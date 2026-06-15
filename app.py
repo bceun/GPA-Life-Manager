@@ -243,9 +243,12 @@ st.write("""
 Target:
 - gpa
 
-비교 모델:
+프로젝트 비교 모델:
 - Linear Regression
 - DNN Regression
+
+웹사이트 기본 예측 모델:
+- Linear Regression
 
 평가 지표:
 - MSE
@@ -253,6 +256,9 @@ Target:
 - MAE
 - R²
 
-본 웹사이트는 수업에서 배운 회귀 분석과 DNN Regression을 GPA 예측 문제에 적용한 결과를
-간단한 생활습관 관리 서비스 형태로 확장한 것입니다.
+본 프로젝트에서는 수업에서 배운 회귀 분석과 DNN Regression을 GPA 예측 문제에 적용하여 비교하였다.
+최종 실험에서 Linear Regression과 DNN Regression의 성능 차이가 매우 작았고,
+Linear Regression이 약간 더 낮은 MSE를 보여 본 웹사이트에서는 Linear Regression 예측값을 기본 참고값으로 사용하였다.
+
+따라서 본 웹사이트는 GPA 예측 모델을 간단한 생활습관 관리 서비스 형태로 확장한 결과물이다.
 """)
