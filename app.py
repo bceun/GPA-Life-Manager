@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import tensorflow as tf
 
 # =========================
 # 웹페이지 설정
@@ -20,10 +19,9 @@ st.set_page_config(
 def load_models():
     lr_model = joblib.load("lr_model.pkl")
     scaler = joblib.load("scaler.pkl")
-    dnn_model = tf.keras.models.load_model("dnn_model.keras")
-    return lr_model, scaler, dnn_model
+    return lr_model, scaler
 
-lr_model, scaler, dnn_model = load_models()
+lr_model, scaler = load_models()
 
 # =========================
 # 공통 함수
@@ -176,12 +174,10 @@ if st.button("예상 GPA 확인하기"):
     }
 
     lr_pred = predict_gpa(input_data, lr_model, scaler)
-    dnn_pred = predict_gpa(input_data, dnn_model, scaler)
 
     st.header("2. 예측 결과")
 
     st.metric("예상 GPA", f"{lr_pred:.2f}")
-    st.write(f"DNN 예측값: {dnn_pred:.2f}")
 
     st.info("""
     최종 실험에서는 Linear Regression과 DNN Regression의 성능 차이가 매우 작았고,
