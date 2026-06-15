@@ -256,9 +256,17 @@ Target:
 - MAE
 - R²
 
-본 프로젝트에서는 수업에서 배운 회귀 분석과 DNN Regression을 GPA 예측 문제에 적용하여 비교하였다.
-최종 실험에서 Linear Regression과 DNN Regression의 성능 차이가 매우 작았고,
-Linear Regression이 약간 더 낮은 MSE를 보여 본 웹사이트에서는 Linear Regression 예측값을 기본 참고값으로 사용하였다.
+본 프로젝트에서는 학생 생활습관 데이터를 기반으로 GPA를 예측하는 회귀 문제를 구성하였다.
+수업시간에 배운 Linear Regression과 DNN Regression을 중심으로 실험을 진행하였고,
+성능 향상을 위해 Ridge Regression과 Polynomial Ridge Regression도 추가로 비교하였다.
 
-따라서 본 웹사이트는 GPA 예측 모델을 간단한 생활습관 관리 서비스 형태로 확장한 결과물이다.
+전체 실험에서는 Polynomial Ridge Regression이 가장 낮은 MSE를 보였다.
+그러나 본 웹사이트는 모델 성능 1위 모델을 그대로 배포하는 것보다,
+수업시간에 배운 회귀 분석 내용을 바탕으로 예측 과정을 쉽게 설명할 수 있는 형태로 확장하는 데 목적이 있다.
+
+따라서 배포 안정성과 해석 가능성을 고려하여,
+웹사이트에서는 Linear Regression 예측값을 기본 참고값으로 사용하였다.
+
+예측 결과와 피드백은 실제 성적을 확정하는 값이 아니라,
+학습 데이터의 패턴을 바탕으로 한 자기관리 참고 정보이다.
 """)
