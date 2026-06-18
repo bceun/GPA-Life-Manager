@@ -52,7 +52,7 @@ def predict_gpa(input_df, model, scaler):
     if isinstance(pred, np.ndarray):
         pred = pred.flatten()[0]
 
-    pred = np.clip(pred, 0, 4)
+    pred = np.clip(pred, 0, 2)
     return float(pred)
 
 def simulate_improvement(user_values, model, scaler):
