@@ -3,18 +3,14 @@ import pandas as pd
 import numpy as np
 import joblib
 
-# =========================
 # 웹페이지 설정
-# =========================
 st.set_page_config(
     page_title="GPA Life Manager",
     page_icon="🎓",
     layout="centered"
 )
 
-# =========================
 # 모델 불러오기
-# =========================
 @st.cache_resource
 def load_models():
     lr_model = joblib.load("lr_model.pkl")
@@ -23,9 +19,7 @@ def load_models():
 
 lr_model, scaler = load_models()
 
-# =========================
 # 공통 함수
-# =========================
 feature_cols = [
     "study_hours",
     "attendance",
@@ -126,9 +120,7 @@ def simulate_improvement(user_values, model, scaler):
 
     return result
 
-# =========================
 # 웹페이지 본문
-# =========================
 st.title("🎓 GPA Life Manager")
 st.subheader("학생 생활습관 기반 GPA 예측 웹사이트")
 
@@ -139,9 +131,7 @@ st.write("""
 예측 결과는 실제 성적을 확정하는 값이 아니라 참고용입니다.
 """)
 
-# =========================
 # 입력값 받기
-# =========================
 st.header("1. 생활습관 입력")
 
 study_hours = st.number_input("하루 공부 시간", 0.0, 12.0, 4.0, 0.5)
@@ -151,9 +141,7 @@ screen_time = st.number_input("하루 스크린타임", 0.0, 16.0, 5.0, 0.5)
 physical_activity = st.number_input("하루 신체활동 시간", 0.0, 8.0, 1.0, 0.5)
 stress = st.slider("스트레스 수준", 1.0, 10.0, 5.0, 0.5)
 
-# =========================
 # 예측
-# =========================
 if st.button("예상 GPA 확인하기"):
     input_data = make_input_df(
         study_hours,
@@ -180,9 +168,7 @@ if st.button("예상 GPA 확인하기"):
     st.metric("예상 GPA", f"{lr_pred:.2f}")
 
     st.info("""
-    최종 실험에서는 Linear Regression과 DNN Regression의 성능 차이가 매우 작았고,
-    Linear Regression이 약간 더 낮은 MSE를 보였습니다.
-    따라서 이 웹사이트에서는 Linear Regression 예측값을 기본 참고값으로 사용합니다.
+    이 웹사이트에서는 Linear Regression 예측값을 기본 참고값으로 사용합니다.
     """)
 
     st.header("3. 생활습관 피드백")
@@ -257,14 +243,8 @@ Target:
 - R²
 
 본 프로젝트에서는 학생 생활습관 데이터를 기반으로 GPA를 예측하는 회귀 문제를 구성하였다.
-수업시간에 배운 Linear Regression과 DNN Regression을 중심으로 실험을 진행하였고,
-성능 향상을 위해 Ridge Regression과 Polynomial Ridge Regression도 추가로 비교하였다.
-
-전체 실험에서는 Polynomial Ridge Regression이 가장 낮은 MSE를 보였다.
-그러나 본 웹사이트는 모델 성능 1위 모델을 그대로 배포하는 것보다,
-수업시간에 배운 회귀 분석 내용을 바탕으로 예측 과정을 쉽게 설명할 수 있는 형태로 확장하는 데 목적이 있다.
-
-따라서 배포 안정성과 해석 가능성을 고려하여,
+Linear Regression과 DNN Regression을 중심으로 실험을 진행하였고,
+배포 안정성과 해석 가능성을 고려하여
 웹사이트에서는 Linear Regression 예측값을 기본 참고값으로 사용하였다.
 
 예측 결과와 피드백은 실제 성적을 확정하는 값이 아니라,
