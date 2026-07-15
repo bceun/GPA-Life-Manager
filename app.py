@@ -1,10 +1,12 @@
-from itertools import product
 from io import BytesIO
+from itertools import product
 
 import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 
 # =========================================================
@@ -18,14 +20,13 @@ st.set_page_config(
 
 
 # =========================================================
-# 모델 점수 및 표시 설정
+# 모델 점수 및 화면 표시 설정
 # =========================================================
-# 현재 저장된 모델의 원본 타깃 범위에 맞춘 값
 MODEL_TARGET_MIN = 0.0
 MODEL_TARGET_MAX = 2.009058
-
-# 사용자 화면에 표시할 환산 점수 만점
 DISPLAY_SCORE_MAX = 4.5
+
+EPSILON = 1e-8
 
 
 # =========================================================
@@ -33,9 +34,6 @@ DISPLAY_SCORE_MAX = 4.5
 # =========================================================
 @st.cache_resource
 def load_models():
-    """
-    저장된 선형회귀 모델과 스케일러를 불러온다.
-    """
     model = joblib.load("lr_model.pkl")
     scaler = joblib.load("scaler.pkl")
 
@@ -90,7 +88,6 @@ LABEL_TO_FEATURE = {
 }
 
 
-# 민감도 분석에서 사용할 변화량
 SENSITIVITY_SETTINGS = {
     "study_hours": {
         "change": 1.0,
@@ -135,10 +132,6 @@ SENSITIVITY_SETTINGS = {
 # 공통 함수
 # =========================================================
 def make_input_df(user_values):
-    """
-    사용자 입력값을 모델 입력용 DataFrame으로 변환한다.
-    모델 학습 당시의 컬럼 순서를 유지한다.
-    """
     input_df = pd.DataFrame([user_values])
 
     missing_cols = [
@@ -156,10 +149,6 @@ def make_input_df(user_values):
 
 
 def convert_to_display_score(model_score):
-    """
-    모델의 원본 예측 점수를
-    사용자용 0~4.5 학업성과 환산 점수로 변환한다.
-    """
     clipped_score = np.clip(
         model_score,
         MODEL_TARGET_MIN,
@@ -182,13 +171,6 @@ def convert_to_display_score(model_score):
 
 
 def predict_score(input_df):
-    """
-    입력값을 스케일링한 뒤 모델로 예측한다.
-
-    반환값:
-    - raw_score: 모델 원본 예측 점수
-    - display_score: 4.5점 기준 학업성과 환산 점수
-    """
     input_scaled = scaler.transform(input_df)
     prediction = lr_model.predict(input_scaled)
 
@@ -213,18 +195,12 @@ def predict_score(input_df):
 
 
 def predict_from_values(user_values):
-    """
-    사용자 입력 딕셔너리를 바로 예측한다.
-    """
-    input_df = make_input_df(user_values)
-
-    return predict_score(input_df)
+    return predict_score(
+        make_input_df(user_values)
+    )
 
 
 def calculate_total_hours(user_values):
-    """
-    주요 시간형 생활습관 항목의 합을 계산한다.
-    """
     return (
         user_values["study_hours"]
         + user_values["sleep_hours"]
@@ -233,29 +209,33 @@ def calculate_total_hours(user_values):
     )
 
 
-def analyze_sensitivity(user_values):
-    """
-    생활요인을 하나씩 변경했을 때
-    학업성과 환산 점수가 얼마나 달라지는지 계산한다.
-    """
-    base_prediction = predict_from_values(user_values)
+def create_range(start, stop, step):
+    if stop < start:
+        return np.array([float(start)])
 
-    base_raw_score = base_prediction["raw_score"]
-    base_display_score = base_prediction["display_score"]
+    values = np.arange(
+        start,
+        stop + step / 2,
+        step
+    )
+
+    return np.round(values, 2)
+
+
+def analyze_sensitivity(user_values):
+    base_prediction = predict_from_values(
+        user_values
+    )
 
     results = []
 
     for feature, setting in SENSITIVITY_SETTINGS.items():
         changed_values = user_values.copy()
 
-        changed_value = (
-            changed_values[feature]
-            + setting["change"]
-        )
-
         changed_value = float(
             np.clip(
-                changed_value,
+                changed_values[feature]
+                + setting["change"],
                 setting["min"],
                 setting["max"]
             )
@@ -276,11 +256,11 @@ def analyze_sensitivity(user_values):
             ),
             "환산 점수 변화량": (
                 changed_prediction["display_score"]
-                - base_display_score
+                - base_prediction["display_score"]
             ),
             "원본 점수 변화량": (
                 changed_prediction["raw_score"]
-                - base_raw_score
+                - base_prediction["raw_score"]
             )
         })
 
@@ -293,9 +273,6 @@ def analyze_sensitivity(user_values):
 
 
 def compare_plans(current_values, future_values):
-    """
-    현재 생활계획과 미래 생활계획을 비교한다.
-    """
     current_prediction = predict_from_values(
         current_values
     )
@@ -318,8 +295,6 @@ def compare_plans(current_values, future_values):
             "단위": FEATURE_UNITS[feature]
         })
 
-    comparison_df = pd.DataFrame(comparison_rows)
-
     return {
         "current_raw_score": current_prediction["raw_score"],
         "future_raw_score": future_prediction["raw_score"],
@@ -333,34 +308,16 @@ def compare_plans(current_values, future_values):
             future_prediction["display_score"]
             - current_prediction["display_score"]
         ),
-        "comparison_df": comparison_df
+        "comparison_df": pd.DataFrame(
+            comparison_rows
+        )
     }
-
-
-def create_range(start, stop, step):
-    """
-    부동소수점 오차를 줄이면서 후보값 배열을 생성한다.
-    """
-    if stop < start:
-        return np.array([float(start)])
-
-    values = np.arange(
-        start,
-        stop + step / 2,
-        step
-    )
-
-    return np.round(values, 2)
 
 
 def calculate_change_cost(
     current_values,
     candidate_values
 ):
-    """
-    현재 생활과 후보 생활계획의 차이를
-    변수 범위에 맞게 정규화하여 변화 부담을 계산한다.
-    """
     normalized_changes = {
         "study_hours": (
             abs(
@@ -406,9 +363,6 @@ def calculate_change_cost(
 
 
 def describe_change_cost(change_cost):
-    """
-    변화 부담 수치를 쉬운 표현으로 변환한다.
-    """
     if change_cost < 0.08:
         return "낮음"
 
@@ -416,6 +370,29 @@ def describe_change_cost(change_cost):
         return "보통"
 
     return "높음"
+
+
+def is_same_plan(
+    first_plan,
+    second_plan
+):
+    return all(
+        abs(
+            float(first_plan[feature])
+            - float(second_plan[feature])
+        ) < EPSILON
+        for feature in FEATURE_COLS
+    )
+
+
+def has_any_change(
+    current_values,
+    candidate_values
+):
+    return not is_same_plan(
+        current_values,
+        candidate_values
+    )
 
 
 def generate_candidate_values(
@@ -426,10 +403,6 @@ def generate_candidate_values(
     max_screen_reduction,
     max_attendance_increase
 ):
-    """
-    사용자가 설정한 현실성 조건에 맞게
-    각 생활요인의 탐색 후보값을 생성한다.
-    """
     if "study_hours" in changeable_features:
         study_stop = min(
             max_study,
@@ -463,6 +436,7 @@ def generate_candidate_values(
             sleep_values = np.array([
                 current_values["sleep_hours"]
             ])
+
         else:
             sleep_values = create_range(
                 sleep_start,
@@ -528,10 +502,6 @@ def generate_recommendation_candidates(
     max_screen_reduction,
     max_attendance_increase
 ):
-    """
-    가능한 생활계획 조합을 탐색하고
-    각 후보의 예상 점수와 변화 부담을 계산한다.
-    """
     candidate_values = generate_candidate_values(
         current_values=current_values,
         changeable_features=changeable_features,
@@ -541,9 +511,13 @@ def generate_recommendation_candidates(
         max_attendance_increase=max_attendance_increase
     )
 
+    current_prediction = predict_from_values(
+        current_values
+    )
+
     candidates = []
 
-    value_combinations = product(
+    combinations = product(
         candidate_values["study_hours"],
         candidate_values["attendance"],
         candidate_values["sleep_hours"],
@@ -555,25 +529,48 @@ def generate_recommendation_candidates(
         attendance,
         sleep_hours,
         screen_time
-    ) in value_combinations:
+    ) in combinations:
 
         candidate = current_values.copy()
 
-        candidate["study_hours"] = float(study_hours)
-        candidate["attendance"] = float(attendance)
-        candidate["sleep_hours"] = float(sleep_hours)
-        candidate["screen_time"] = float(screen_time)
+        candidate["study_hours"] = float(
+            study_hours
+        )
+        candidate["attendance"] = float(
+            attendance
+        )
+        candidate["sleep_hours"] = float(
+            sleep_hours
+        )
+        candidate["screen_time"] = float(
+            screen_time
+        )
 
-        total_hours = calculate_total_hours(candidate)
+        total_hours = calculate_total_hours(
+            candidate
+        )
 
         if total_hours > 24:
             continue
 
-        prediction = predict_from_values(candidate)
+        prediction = predict_from_values(
+            candidate
+        )
 
         change_cost = calculate_change_cost(
             current_values,
             candidate
+        )
+
+        candidate_changed = has_any_change(
+            current_values,
+            candidate
+        )
+
+        score_improved = (
+            prediction["display_score"]
+            > current_prediction["display_score"]
+            + EPSILON
         )
 
         candidates.append({
@@ -585,8 +582,16 @@ def generate_recommendation_candidates(
                 candidate["physical_activity"]
             ),
             "stress": candidate["stress"],
-            "예상 환산 점수": prediction["display_score"],
-            "원본 예측 점수": prediction["raw_score"],
+            "예상 환산 점수": (
+                prediction["display_score"]
+            ),
+            "원본 예측 점수": (
+                prediction["raw_score"]
+            ),
+            "현재 대비 점수 변화": (
+                prediction["display_score"]
+                - current_prediction["display_score"]
+            ),
             "변화 부담 수치": change_cost,
             "변화 부담": describe_change_cost(
                 change_cost
@@ -595,42 +600,111 @@ def generate_recommendation_candidates(
                 prediction["display_score"]
                 >= target_score
             ),
+            "현재와 다른 계획": candidate_changed,
+            "현재보다 개선": score_improved,
             "주요 생활시간 합계": total_hours
         })
 
     return pd.DataFrame(candidates)
 
 
+def plan_key(row):
+    return tuple(
+        round(float(row[feature]), 4)
+        for feature in FEATURE_COLS
+    )
+
+
+def choose_unique_row(
+    sorted_dataframe,
+    used_plan_keys
+):
+    for _, row in sorted_dataframe.iterrows():
+        key = plan_key(row)
+
+        if key not in used_plan_keys:
+            used_plan_keys.add(key)
+            return row
+
+    return None
+
+
 def select_recommendations(
     candidates,
     target_score
 ):
-    """
-    후보 데이터에서 다음 추천안을 선택한다.
-
-    - 최소 변화형
-    - 균형형
-    - 성과 우선형
-    """
     if candidates.empty:
         return {
             "target_reached": False,
-            "recommendations": pd.DataFrame()
+            "recommendations": pd.DataFrame(),
+            "candidate_pool_type": "후보 없음"
         }
 
-    reached_candidates = candidates[
-        candidates["예상 환산 점수"] >= target_score
+    changed_candidates = candidates[
+        candidates["현재와 다른 계획"]
+    ].copy()
+
+    if changed_candidates.empty:
+        return {
+            "target_reached": False,
+            "recommendations": pd.DataFrame(),
+            "candidate_pool_type": "변경 후보 없음"
+        }
+
+    reached_candidates = changed_candidates[
+        changed_candidates["예상 환산 점수"]
+        >= target_score
     ].copy()
 
     target_reached = not reached_candidates.empty
 
     if target_reached:
         selection_pool = reached_candidates.copy()
+        candidate_pool_type = "목표 달성 후보"
 
     else:
-        selection_pool = candidates.copy()
+        improved_candidates = changed_candidates[
+            changed_candidates["현재보다 개선"]
+        ].copy()
 
-    minimum_change = selection_pool.sort_values(
+        if not improved_candidates.empty:
+            selection_pool = improved_candidates
+            candidate_pool_type = "목표 미달 개선 후보"
+
+        else:
+            selection_pool = changed_candidates.copy()
+            candidate_pool_type = "목표 미달 변경 후보"
+
+    selection_pool["균형 점수"] = (
+        (
+            selection_pool["예상 환산 점수"]
+            / DISPLAY_SCORE_MAX
+        )
+        * 0.65
+        + (
+            1.0
+            - np.clip(
+                selection_pool["변화 부담 수치"],
+                0.0,
+                1.0
+            )
+        )
+        * 0.35
+    )
+
+    if target_reached:
+        minimum_label = "최소 변화형"
+        balanced_label = "균형형"
+        performance_label = "성과 우선형"
+
+    else:
+        minimum_label = "최소 변화 개선형"
+        balanced_label = "균형 개선형"
+        performance_label = "최고 성과형"
+
+    used_plan_keys = set()
+
+    minimum_sorted = selection_pool.sort_values(
         by=[
             "변화 부담 수치",
             "예상 환산 점수"
@@ -639,9 +713,32 @@ def select_recommendations(
             True,
             False
         ]
-    ).iloc[0]
+    )
 
-    performance_first = selection_pool.sort_values(
+    minimum_row = choose_unique_row(
+        minimum_sorted,
+        used_plan_keys
+    )
+
+    balanced_sorted = selection_pool.sort_values(
+        by=[
+            "균형 점수",
+            "예상 환산 점수",
+            "변화 부담 수치"
+        ],
+        ascending=[
+            False,
+            False,
+            True
+        ]
+    )
+
+    balanced_row = choose_unique_row(
+        balanced_sorted,
+        used_plan_keys
+    )
+
+    performance_sorted = selection_pool.sort_values(
         by=[
             "예상 환산 점수",
             "변화 부담 수치"
@@ -650,38 +747,46 @@ def select_recommendations(
             False,
             True
         ]
-    ).iloc[0]
-
-    selection_pool["균형 점수"] = (
-        selection_pool["예상 환산 점수"]
-        / DISPLAY_SCORE_MAX
-        * 0.7
-        - selection_pool["변화 부담 수치"]
-        * 0.3
     )
 
-    balanced = selection_pool.sort_values(
-        by=[
-            "균형 점수",
-            "예상 환산 점수"
-        ],
-        ascending=[
-            False,
-            False
-        ]
-    ).iloc[0]
+    performance_row = choose_unique_row(
+        performance_sorted,
+        used_plan_keys
+    )
+
+    selected_rows = [
+        (
+            minimum_label,
+            minimum_row,
+            (
+                "설정한 조건 안에서 현재 생활과의 차이가 "
+                "가장 작은 계획입니다."
+            )
+        ),
+        (
+            balanced_label,
+            balanced_row,
+            (
+                "예상 성과와 생활 변화 부담을 함께 "
+                "고려한 절충 계획입니다."
+            )
+        ),
+        (
+            performance_label,
+            performance_row,
+            (
+                "설정한 조건 안에서 가장 높은 "
+                "학업성과 점수를 예측한 계획입니다."
+            )
+        )
+    ]
 
     recommendation_rows = []
 
-    recommendation_map = {
-        "최소 변화형": minimum_change,
-        "균형형": balanced,
-        "성과 우선형": performance_first
-    }
+    for recommendation_type, row, reason in selected_rows:
+        if row is None:
+            continue
 
-    for recommendation_type, row in (
-        recommendation_map.items()
-    ):
         recommendation_rows.append({
             "추천 유형": recommendation_type,
             "공부 시간": row["study_hours"],
@@ -690,13 +795,23 @@ def select_recommendations(
             "스크린타임": row["screen_time"],
             "신체활동": row["physical_activity"],
             "스트레스": row["stress"],
-            "예상 환산 점수": row["예상 환산 점수"],
-            "원본 예측 점수": row["원본 예측 점수"],
+            "예상 환산 점수": (
+                row["예상 환산 점수"]
+            ),
+            "현재 대비 점수 변화": (
+                row["현재 대비 점수 변화"]
+            ),
+            "원본 예측 점수": (
+                row["원본 예측 점수"]
+            ),
             "변화 부담": row["변화 부담"],
-            "변화 부담 수치": row["변화 부담 수치"],
+            "변화 부담 수치": (
+                row["변화 부담 수치"]
+            ),
             "주요 생활시간 합계": (
                 row["주요 생활시간 합계"]
-            )
+            ),
+            "추천 이유": reason
         })
 
     recommendations = pd.DataFrame(
@@ -705,7 +820,8 @@ def select_recommendations(
 
     return {
         "target_reached": target_reached,
-        "recommendations": recommendations
+        "recommendations": recommendations,
+        "candidate_pool_type": candidate_pool_type
     }
 
 
@@ -713,9 +829,6 @@ def make_recommendation_comparison(
     current_values,
     recommendations
 ):
-    """
-    추천안과 현재 생활의 차이를 비교하는 표를 만든다.
-    """
     rows = []
 
     for _, recommendation in recommendations.iterrows():
@@ -740,19 +853,209 @@ def make_recommendation_comparison(
             "예상 환산 점수": (
                 recommendation["예상 환산 점수"]
             ),
-            "변화 부담": recommendation["변화 부담"]
+            "현재 대비 점수 변화": (
+                recommendation["현재 대비 점수 변화"]
+            ),
+            "변화 부담": (
+                recommendation["변화 부담"]
+            )
         })
 
     return pd.DataFrame(rows)
 
 
-def dataframe_to_csv_bytes(dataframe):
-    """
-    DataFrame을 UTF-8 BOM이 포함된 CSV로 변환한다.
-    """
-    return dataframe.to_csv(
-        index=False
-    ).encode("utf-8-sig")
+def build_change_summary(
+    current_values,
+    recommendation
+):
+    changes = []
+
+    change_items = [
+        ("공부 시간", "study_hours", "공부 시간", "시간"),
+        ("출석률", "attendance", "출석률", "%"),
+        ("수면 시간", "sleep_hours", "수면 시간", "시간"),
+        ("스크린타임", "screen_time", "스크린타임", "시간")
+    ]
+
+    recommendation_columns = {
+        "study_hours": "공부 시간",
+        "attendance": "출석률",
+        "sleep_hours": "수면 시간",
+        "screen_time": "스크린타임"
+    }
+
+    for (
+        label,
+        current_key,
+        _,
+        unit
+    ) in change_items:
+
+        recommendation_column = (
+            recommendation_columns[current_key]
+        )
+
+        current_value = float(
+            current_values[current_key]
+        )
+
+        recommended_value = float(
+            recommendation[recommendation_column]
+        )
+
+        difference = (
+            recommended_value
+            - current_value
+        )
+
+        if abs(difference) < EPSILON:
+            continue
+
+        if difference > 0:
+            direction = "증가"
+        else:
+            direction = "감소"
+
+        if current_key == "attendance":
+            changes.append(
+                f"{label} {abs(difference):.0f}%p {direction}"
+            )
+
+        else:
+            changes.append(
+                f"{label} {abs(difference):.1f}{unit} {direction}"
+            )
+
+    if not changes:
+        return "현재 생활과 동일한 계획입니다."
+
+    return ", ".join(changes)
+
+
+def recommendations_to_xlsx(
+    recommendations,
+    comparison_df,
+    current_values,
+    target_score
+):
+    output = BytesIO()
+
+    export_recommendations = (
+        recommendations.copy()
+    )
+
+    export_comparison = (
+        comparison_df.copy()
+    )
+
+    current_df = pd.DataFrame({
+        "항목": [
+            "현재 공부 시간",
+            "현재 출석률",
+            "현재 수면 시간",
+            "현재 스크린타임",
+            "현재 신체활동",
+            "현재 스트레스",
+            "목표 학업성과 점수"
+        ],
+        "값": [
+            current_values["study_hours"],
+            current_values["attendance"],
+            current_values["sleep_hours"],
+            current_values["screen_time"],
+            current_values["physical_activity"],
+            current_values["stress"],
+            target_score
+        ]
+    })
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        export_recommendations.to_excel(
+            writer,
+            sheet_name="추천 계획",
+            index=False
+        )
+
+        export_comparison.to_excel(
+            writer,
+            sheet_name="현재 대비 변화",
+            index=False
+        )
+
+        current_df.to_excel(
+            writer,
+            sheet_name="입력 조건",
+            index=False
+        )
+
+        workbook = writer.book
+
+        header_fill = PatternFill(
+            fill_type="solid",
+            fgColor="D9EAF7"
+        )
+
+        header_font = Font(
+            bold=True
+        )
+
+        for worksheet in workbook.worksheets:
+            worksheet.freeze_panes = "A2"
+            worksheet.auto_filter.ref = (
+                worksheet.dimensions
+            )
+
+            for cell in worksheet[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(
+                    horizontal="center",
+                    vertical="center"
+                )
+
+            for column_cells in worksheet.columns:
+                max_length = 0
+
+                column_letter = get_column_letter(
+                    column_cells[0].column
+                )
+
+                for cell in column_cells:
+                    cell.alignment = Alignment(
+                        vertical="center",
+                        wrap_text=True
+                    )
+
+                    if cell.value is not None:
+                        max_length = max(
+                            max_length,
+                            len(str(cell.value))
+                        )
+
+                worksheet.column_dimensions[
+                    column_letter
+                ].width = min(
+                    max(max_length + 3, 12),
+                    35
+                )
+
+            for row in worksheet.iter_rows(
+                min_row=2
+            ):
+                for cell in row:
+                    if isinstance(
+                        cell.value,
+                        float
+                    ):
+                        cell.number_format = "0.00"
+
+    output.seek(0)
+
+    return output.getvalue()
 
 
 # =========================================================
@@ -786,13 +1089,13 @@ st.write("""
 생활계획을 변경했을 때 예측 결과가 어떻게 달라지는지
 가상으로 비교할 수 있습니다.
 
-또한 목표 학업성과 점수와 현실적인 생활조건을 입력하면,
-가능한 생활계획 조합을 탐색하여 추천안을 제공합니다.
+목표 학업성과 점수와 현실적인 생활조건을 설정하면
+여러 후보 계획을 탐색하여 맞춤형 추천안을 제공합니다.
 """)
 
 st.warning("""
 표시되는 학업성과 환산 점수는 실제 학교 성적이나
-공식 GPA를 의미하지 않습니다.
+공식 GPA가 아닙니다.
 
 현재 모델의 원본 예측 점수를 4.5점 범위로 변환한
 자기관리 참고용 지표입니다.
@@ -933,6 +1236,7 @@ with tab1:
 
             st.session_state.comparison_result = None
             st.session_state.recommendation_result = None
+            st.session_state.recommendation_conditions = None
 
         except Exception as error:
             st.error(
@@ -1252,21 +1556,20 @@ with tab3:
                 comparison_df.copy()
             )
 
-            for column in [
-                "현재",
-                "미래 계획",
-                "변화"
-            ]:
-                if column == "변화":
-                    display_comparison_df[column] = (
-                        display_comparison_df[column]
-                        .map(lambda value: f"{value:+.1f}")
-                    )
-                else:
-                    display_comparison_df[column] = (
-                        display_comparison_df[column]
-                        .map(lambda value: f"{value:.1f}")
-                    )
+            display_comparison_df["현재"] = (
+                display_comparison_df["현재"]
+                .map(lambda value: f"{value:.1f}")
+            )
+
+            display_comparison_df["미래 계획"] = (
+                display_comparison_df["미래 계획"]
+                .map(lambda value: f"{value:.1f}")
+            )
+
+            display_comparison_df["변화"] = (
+                display_comparison_df["변화"]
+                .map(lambda value: f"{value:+.1f}")
+            )
 
             st.dataframe(
                 display_comparison_df,
@@ -1366,7 +1669,9 @@ with tab4:
 
             max_study = st.number_input(
                 "하루 최대 공부 시간",
-                min_value=float(current["study_hours"]),
+                min_value=float(
+                    current["study_hours"]
+                ),
                 max_value=12.0,
                 value=float(
                     min(
@@ -1381,7 +1686,9 @@ with tab4:
                 "반드시 확보할 최소 수면 시간",
                 min_value=0.0,
                 max_value=12.0,
-                value=float(current["sleep_hours"]),
+                value=float(
+                    current["sleep_hours"]
+                ),
                 step=0.5
             )
 
@@ -1389,7 +1696,9 @@ with tab4:
             max_screen_reduction = st.number_input(
                 "줄일 수 있는 최대 스크린타임",
                 min_value=0.0,
-                max_value=float(current["screen_time"]),
+                max_value=float(
+                    current["screen_time"]
+                ),
                 value=float(
                     min(
                         2.0,
@@ -1403,12 +1712,14 @@ with tab4:
                 "가능한 출석률 최대 증가폭",
                 min_value=0.0,
                 max_value=float(
-                    100.0 - current["attendance"]
+                    100.0
+                    - current["attendance"]
                 ),
                 value=float(
                     min(
                         10.0,
-                        100.0 - current["attendance"]
+                        100.0
+                        - current["attendance"]
                     )
                 ),
                 step=1.0
@@ -1495,7 +1806,9 @@ with tab4:
 
                         st.session_state.recommendation_conditions = {
                             "target_score": target_score,
-                            "candidate_count": len(candidates),
+                            "candidate_count": len(
+                                candidates
+                            ),
                             "changeable_labels": (
                                 changeable_labels
                             )
@@ -1534,8 +1847,9 @@ with tab4:
 
             if recommendations.empty:
                 st.error(
-                    "설정한 조건을 만족하는 "
-                    "생활계획 후보를 찾지 못했습니다."
+                    "현재 설정으로는 서로 다른 추천 계획을 "
+                    "생성하지 못했습니다. "
+                    "변경 가능 항목이나 조건 범위를 넓혀 주세요."
                 )
 
             else:
@@ -1549,9 +1863,76 @@ with tab4:
                     st.warning(
                         "설정한 조건에서는 목표 점수에 "
                         "도달하지 못했습니다. "
-                        "대신 가능한 후보 중 가장 우수한 "
-                        "계획을 제시합니다."
+                        "현재 상태보다 개선되는 후보 중 "
+                        "가장 적합한 계획을 제시합니다."
                     )
+
+                st.caption(
+                    "추천 기준: "
+                    f"{recommendation_result['candidate_pool_type']}"
+                )
+
+                card_columns = st.columns(
+                    len(recommendations)
+                )
+
+                for column, (_, row) in zip(
+                    card_columns,
+                    recommendations.iterrows()
+                ):
+                    with column:
+                        st.subheader(
+                            row["추천 유형"]
+                        )
+
+                        st.metric(
+                            "예상 학업성과 점수",
+                            (
+                                f"{row['예상 환산 점수']:.2f}"
+                                f" / {DISPLAY_SCORE_MAX:.2f}"
+                            ),
+                            (
+                                f"{row['현재 대비 점수 변화']:+.2f}"
+                            )
+                        )
+
+                        st.write(
+                            f"**공부 시간:** "
+                            f"{row['공부 시간']:.1f}시간"
+                        )
+
+                        st.write(
+                            f"**출석률:** "
+                            f"{row['출석률']:.0f}%"
+                        )
+
+                        st.write(
+                            f"**수면 시간:** "
+                            f"{row['수면 시간']:.1f}시간"
+                        )
+
+                        st.write(
+                            f"**스크린타임:** "
+                            f"{row['스크린타임']:.1f}시간"
+                        )
+
+                        st.write(
+                            f"**변화 부담:** "
+                            f"{row['변화 부담']}"
+                        )
+
+                        st.info(
+                            row["추천 이유"]
+                        )
+
+                        st.caption(
+                            build_change_summary(
+                                current,
+                                row
+                            )
+                        )
+
+                st.subheader("추천 계획 비교")
 
                 display_recommendations = (
                     recommendations[
@@ -1562,23 +1943,36 @@ with tab4:
                             "수면 시간",
                             "스크린타임",
                             "예상 환산 점수",
+                            "현재 대비 점수 변화",
                             "변화 부담",
-                            "주요 생활시간 합계"
+                            "주요 생활시간 합계",
+                            "추천 이유"
                         ]
                     ].copy()
                 )
 
-                for column in [
+                numeric_columns = [
                     "공부 시간",
                     "출석률",
                     "수면 시간",
                     "스크린타임",
                     "예상 환산 점수",
+                    "현재 대비 점수 변화",
                     "주요 생활시간 합계"
-                ]:
-                    display_recommendations[column] = (
-                        display_recommendations[column]
-                        .map(lambda value: f"{value:.2f}")
+                ]
+
+                for column in numeric_columns:
+                    display_recommendations[
+                        column
+                    ] = (
+                        display_recommendations[
+                            column
+                        ]
+                        .map(
+                            lambda value: (
+                                f"{value:.2f}"
+                            )
+                        )
                     )
 
                 st.dataframe(
@@ -1598,17 +1992,24 @@ with tab4:
                     "현재 생활 대비 추천 변화"
                 )
 
-                display_comparison = comparison.copy()
+                display_comparison = (
+                    comparison.copy()
+                )
 
                 for column in [
                     "공부 시간 변화",
                     "출석률 변화",
                     "수면 시간 변화",
-                    "스크린타임 변화"
+                    "스크린타임 변화",
+                    "현재 대비 점수 변화"
                 ]:
                     display_comparison[column] = (
                         display_comparison[column]
-                        .map(lambda value: f"{value:+.1f}")
+                        .map(
+                            lambda value: (
+                                f"{value:+.2f}"
+                            )
+                        )
                     )
 
                 display_comparison[
@@ -1617,7 +2018,9 @@ with tab4:
                     display_comparison[
                         "예상 환산 점수"
                     ]
-                    .map(lambda value: f"{value:.2f}")
+                    .map(
+                        lambda value: f"{value:.2f}"
+                    )
                 )
 
                 st.dataframe(
@@ -1626,36 +2029,29 @@ with tab4:
                     hide_index=True
                 )
 
-                best_recommendation = (
-                    recommendations[
-                        recommendations["추천 유형"]
-                        == "균형형"
-                    ].iloc[0]
-                )
-
-                st.info(
-                    f"균형형 추천안은 공부 시간 "
-                    f"{best_recommendation['공부 시간']:.1f}시간, "
-                    f"출석률 "
-                    f"{best_recommendation['출석률']:.0f}%, "
-                    f"수면 시간 "
-                    f"{best_recommendation['수면 시간']:.1f}시간, "
-                    f"스크린타임 "
-                    f"{best_recommendation['스크린타임']:.1f}시간으로 "
-                    f"구성됩니다."
-                )
-
-                csv_data = dataframe_to_csv_bytes(
-                    recommendations
+                xlsx_data = recommendations_to_xlsx(
+                    recommendations=(
+                        recommendations
+                    ),
+                    comparison_df=comparison,
+                    current_values=current,
+                    target_score=(
+                        recommendation_conditions[
+                            "target_score"
+                        ]
+                    )
                 )
 
                 st.download_button(
-                    label="추천 계획 CSV 다운로드",
-                    data=csv_data,
+                    label="추천 계획 엑셀 다운로드",
+                    data=xlsx_data,
                     file_name=(
-                        "campus_twin_recommendations.csv"
+                        "campus_twin_recommendations.xlsx"
                     ),
-                    mime="text/csv"
+                    mime=(
+                        "application/vnd.openxmlformats-"
+                        "officedocument.spreadsheetml.sheet"
+                    )
                 )
 
                 st.caption(
@@ -1713,20 +2109,37 @@ with tab5:
     사용자가 설정한 목표 점수와 생활조건 안에서
     가능한 생활계획 조합을 생성합니다.
 
-    각 후보 계획을 예측모델에 입력한 뒤
+    각 후보 계획을 예측모델에 입력하고
     학업성과 환산 점수와 현재 생활 대비 변화 부담을 계산합니다.
+
+    목표 달성 여부에 따라 최소 변화형, 균형형,
+    성과 우선형 또는 개선형 추천안을 제공합니다.
     """)
 
     recommendation_info = pd.DataFrame({
         "추천 유형": [
             "최소 변화형",
             "균형형",
-            "성과 우선형"
+            "성과 우선형",
+            "최소 변화 개선형",
+            "균형 개선형",
+            "최고 성과형"
+        ],
+        "적용 상황": [
+            "목표 달성 가능",
+            "목표 달성 가능",
+            "목표 달성 가능",
+            "목표 달성 불가능",
+            "목표 달성 불가능",
+            "목표 달성 불가능"
         ],
         "선정 기준": [
             "목표를 달성하면서 현재 생활과 가장 비슷한 계획",
-            "예상 점수와 생활 변화 부담을 함께 고려한 계획",
-            "입력한 조건 안에서 예상 점수가 가장 높은 계획"
+            "성과와 생활 변화 부담을 함께 고려한 계획",
+            "목표 달성 후보 중 예상 점수가 가장 높은 계획",
+            "현재보다 개선되면서 변화가 가장 적은 계획",
+            "개선 효과와 변화 부담을 함께 고려한 계획",
+            "현실적 조건 안에서 가장 높은 점수의 계획"
         ]
     })
 
@@ -1739,8 +2152,7 @@ with tab5:
     st.subheader("점수 표시 방식")
 
     st.write(f"""
-    모델의 원본 예측 점수는
-    사용자 이해를 돕기 위해
+    모델의 원본 예측 점수는 사용자 이해를 돕기 위해
     {DISPLAY_SCORE_MAX:.1f}점 범위의
     학업성과 환산 점수로 변환합니다.
     """)
@@ -1763,8 +2175,10 @@ with tab5:
     - 생활요인별 예측 변화량 시각화
     - 현재 생활과 미래 생활계획 비교
     - 목표와 제약조건 기반 추천 계획 탐색
-    - 최소 변화형·균형형·성과 우선형 추천
-    - 추천 결과 CSV 다운로드
+    - 목표 달성 여부에 따른 추천 유형 변경
+    - 중복되지 않는 추천안 제공
+    - 추천 이유 및 변화 내용 설명
+    - 추천 결과 엑셀 다운로드
     - 비현실적인 시간 입력 경고
     """)
 
