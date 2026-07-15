@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import tensorflow as tf
 
 
 # =========================
@@ -22,18 +21,17 @@ st.set_page_config(
 def load_models():
     lr_model = joblib.load("lr_model.pkl")
     scaler = joblib.load("scaler.pkl")
-    dnn_model = tf.keras.models.load_model("dnn_model.keras")
 
-    return lr_model, scaler, dnn_model
+    return lr_model, scaler
 
 
 try:
-    lr_model, scaler, dnn_model = load_models()
+    lr_model, scaler = load_models()
 
 except Exception as error:
     st.error(
         "모델 파일을 불러오지 못했습니다. "
-        "lr_model.pkl, scaler.pkl, dnn_model.keras 파일을 확인해 주세요."
+        "lr_model.pkl과 scaler.pkl 파일을 확인해 주세요."
     )
     st.exception(error)
     st.stop()
