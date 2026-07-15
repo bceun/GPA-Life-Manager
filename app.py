@@ -5,7 +5,7 @@ import joblib
 
 
 # =========================
-# 웹페이지 설정
+# 페이지 설정
 # =========================
 st.set_page_config(
     page_title="Campus Twin",
@@ -68,7 +68,7 @@ FEATURE_UNITS = {
 }
 
 
-# 민감도 분석에서 사용할 변화 방향과 크기
+# 민감도 분석에서 사용할 변화량
 SENSITIVITY_SETTINGS = {
     "study_hours": {
         "change": 1.0,
@@ -114,7 +114,7 @@ SENSITIVITY_SETTINGS = {
 # =========================
 def make_input_df(user_values):
     """
-    사용자 입력 딕셔너리를 모델 입력용 데이터프레임으로 변환한다.
+    사용자 입력값을 모델 입력용 DataFrame으로 변환한다.
     모델 학습 당시 컬럼 순서를 유지한다.
     """
     input_df = pd.DataFrame([user_values])
@@ -132,44 +132,40 @@ def make_input_df(user_values):
     return input_df[FEATURE_COLS]
 
 
-def predict_gpa(input_df, model, scaler):
+def predict_gpa(input_df):
     """
-    입력값을 스케일링한 뒤 GPA를 예측한다.
-    예측값은 0.0~4.0 범위로 제한한다.
+    입력값을 스케일링하고 GPA를 예측한다.
+    결과는 0.0~4.0 범위로 제한한다.
     """
     input_scaled = scaler.transform(input_df)
 
-    pred = model.predict(input_scaled)
+    prediction = lr_model.predict(input_scaled)
 
-    if isinstance(pred, np.ndarray):
-        pred = pred.reshape(-1)[0]
+    prediction = np.asarray(prediction).reshape(-1)[0]
+    prediction = np.clip(prediction, 0.0, 4.0)
 
-    pred = np.clip(pred, 0.0, 4.0)
-
-    return float(pred)
+    return float(prediction)
 
 
-def validate_daily_hours(user_values):
+def calculate_total_hours(user_values):
     """
-    주요 시간형 입력값의 합이 지나치게 큰지 확인한다.
+    시간형 생활습관 항목의 합을 계산한다.
     """
-    total_hours = (
+    return (
         user_values["study_hours"]
         + user_values["sleep_hours"]
         + user_values["screen_time"]
         + user_values["physical_activity"]
     )
 
-    return total_hours
 
-
-def analyze_sensitivity(user_values, model, scaler):
+def analyze_sensitivity(user_values):
     """
-    현재 입력값에서 변수 하나씩 변경했을 때
-    모델의 GPA 예측값이 얼마나 달라지는지 계산한다.
+    생활요인을 하나씩 변경했을 때
+    예상 GPA가 얼마나 변하는지 계산한다.
     """
     base_df = make_input_df(user_values)
-    base_gpa = predict_gpa(base_df, model, scaler)
+    base_gpa = predict_gpa(base_df)
 
     results = []
 
@@ -192,11 +188,7 @@ def analyze_sensitivity(user_values, model, scaler):
         changed_values[feature] = changed_value
 
         changed_df = make_input_df(changed_values)
-        changed_gpa = predict_gpa(
-            changed_df,
-            model,
-            scaler
-        )
+        changed_gpa = predict_gpa(changed_df)
 
         results.append({
             "생활요인 변화": setting["description"],
@@ -214,29 +206,15 @@ def analyze_sensitivity(user_values, model, scaler):
     ).reset_index(drop=True)
 
 
-def compare_plans(
-    current_values,
-    future_values,
-    model,
-    scaler
-):
+def compare_plans(current_values, future_values):
     """
-    현재 생활계획과 사용자가 설정한 미래 생활계획을 비교한다.
+    현재 생활계획과 미래 생활계획을 비교한다.
     """
     current_df = make_input_df(current_values)
     future_df = make_input_df(future_values)
 
-    current_gpa = predict_gpa(
-        current_df,
-        model,
-        scaler
-    )
-
-    future_gpa = predict_gpa(
-        future_df,
-        model,
-        scaler
-    )
+    current_gpa = predict_gpa(current_df)
+    future_gpa = predict_gpa(future_df)
 
     comparison_rows = []
 
@@ -268,18 +246,18 @@ def compare_plans(
 if "current_values" not in st.session_state:
     st.session_state.current_values = None
 
-if "lr_prediction" not in st.session_state:
-    st.session_state.lr_prediction = None
-
-if "dnn_prediction" not in st.session_state:
-    st.session_state.dnn_prediction = None
+if "prediction" not in st.session_state:
+    st.session_state.prediction = None
 
 if "sensitivity_df" not in st.session_state:
     st.session_state.sensitivity_df = None
 
+if "comparison_result" not in st.session_state:
+    st.session_state.comparison_result = None
+
 
 # =========================
-# 웹페이지 상단
+# 상단 소개
 # =========================
 st.title("🎓 Campus Twin")
 
@@ -289,11 +267,11 @@ st.subheader(
 
 st.write("""
 현재 생활습관을 바탕으로 예상 GPA를 확인하고,
-생활요인을 변화시켰을 때 모델의 예측값이 어떻게 달라지는지
+생활계획을 변경했을 때 모델의 예측값이 어떻게 달라지는지
 가상으로 비교할 수 있습니다.
 
 예측 결과는 실제 성적을 보장하거나 인과관계를 의미하지 않으며,
-자기관리 참고용으로만 사용해야 합니다.
+자기관리 참고용으로만 제공됩니다.
 """)
 
 
@@ -309,7 +287,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 
 # =========================
-# 1. 현재 상태
+# 탭 1: 현재 상태
 # =========================
 with tab1:
     st.header("현재 생활습관 입력")
@@ -381,7 +359,7 @@ with tab1:
         "stress": stress
     }
 
-    total_hours = validate_daily_hours(current_values)
+    total_hours = calculate_total_hours(current_values)
 
     if total_hours > 24:
         st.warning(
@@ -390,91 +368,53 @@ with tab1:
             "하루 24시간을 초과하므로 입력값을 다시 확인해 주세요."
         )
 
-    if st.button(
+    analyze_button = st.button(
         "현재 상태 분석하기",
         type="primary"
-    ):
+    )
+
+    if analyze_button:
         try:
-            input_data = make_input_df(current_values)
+            input_df = make_input_df(current_values)
+            prediction = predict_gpa(input_df)
+            sensitivity_df = analyze_sensitivity(current_values)
 
-            lr_pred = predict_gpa(
-                input_data,
-                lr_model,
-                scaler
-            )
-
-            dnn_pred = predict_gpa(
-                input_data,
-                dnn_model,
-                scaler
-            )
-
-            sensitivity_df = analyze_sensitivity(
-                current_values,
-                lr_model,
-                scaler
-            )
-
-            st.session_state.current_values = (
-                current_values.copy()
-            )
-            st.session_state.lr_prediction = lr_pred
-            st.session_state.dnn_prediction = dnn_pred
+            st.session_state.current_values = current_values.copy()
+            st.session_state.prediction = prediction
             st.session_state.sensitivity_df = sensitivity_df
+            st.session_state.comparison_result = None
 
         except Exception as error:
-            st.error(
-                "예측 중 오류가 발생했습니다."
-            )
+            st.error("예측 중 오류가 발생했습니다.")
             st.exception(error)
 
-    if st.session_state.lr_prediction is not None:
+    if st.session_state.prediction is not None:
         st.divider()
         st.subheader("예측 결과")
 
-        result_col1, result_col2 = st.columns(2)
-
-        with result_col1:
-            st.metric(
-                "기본 예상 GPA",
-                f"{st.session_state.lr_prediction:.2f}"
-            )
-
-        with result_col2:
-            st.metric(
-                "DNN 비교 예측값",
-                f"{st.session_state.dnn_prediction:.2f}"
-            )
-
-        model_difference = abs(
-            st.session_state.lr_prediction
-            - st.session_state.dnn_prediction
-        )
-
-        st.write(
-            f"두 모델의 예측값 차이: "
-            f"**{model_difference:.3f}**"
+        st.metric(
+            "예상 GPA",
+            f"{st.session_state.prediction:.2f}"
         )
 
         st.info("""
-        현재 서비스에서는 Linear Regression 예측값을
-        기본 참고값으로 사용하고,
-        DNN 결과는 모델 간 비교 정보로 제공합니다.
+        현재 서비스는 Linear Regression 모델을
+        기본 GPA 예측모델로 사용합니다.
         """)
 
         st.caption(
-            "모델의 예측값은 실제 성적을 확정하지 않습니다."
+            "모델의 예측값은 실제 성적을 확정하거나 보장하지 않습니다."
         )
 
 
 # =========================
-# 2. 개인별 분석
+# 탭 2: 개인별 분석
 # =========================
 with tab2:
     st.header("개인별 민감도 분석")
 
     st.write("""
-    현재 입력값에서 생활요인 하나를 조금씩 변경했을 때,
+    현재 입력값에서 생활요인을 하나씩 변경했을 때
     모델의 예상 GPA가 얼마나 달라지는지 계산합니다.
     """)
 
@@ -483,7 +423,7 @@ with tab2:
         or st.session_state.sensitivity_df is None
     ):
         st.info(
-            "'현재 상태' 탭에서 먼저 생활습관을 입력하고 "
+            "'현재 상태' 탭에서 생활습관을 입력한 뒤 "
             "'현재 상태 분석하기' 버튼을 눌러 주세요."
         )
 
@@ -516,14 +456,17 @@ with tab2:
             hide_index=True
         )
 
-        chart_df = sensitivity_df.set_index(
-            "생활요인 변화"
-        )
-
         st.subheader("생활요인별 예측 변화량")
 
+        chart_df = sensitivity_df[
+            ["생활요인 변화", "예측 변화량"]
+        ].copy()
+
+        chart_df = chart_df.set_index("생활요인 변화")
+
         st.bar_chart(
-            chart_df["예측 변화량"]
+            chart_df["예측 변화량"],
+            use_container_width=True
         )
 
         best_result = sensitivity_df.iloc[0]
@@ -536,27 +479,28 @@ with tab2:
                 f"예상 변화량은 "
                 f"{best_result['예측 변화량']:+.3f}입니다."
             )
+
         else:
             st.warning(
-                "현재 설정한 변화 시나리오에서는 "
-                "예측 GPA가 상승하는 항목이 확인되지 않았습니다."
+                "현재 설정된 변화 시나리오에서는 "
+                "예상 GPA가 상승하는 항목이 확인되지 않았습니다."
             )
 
         st.caption(
-            "민감도 분석은 모델의 예측 반응을 보여주는 것이며, "
-            "해당 행동이 실제 GPA 상승의 원인임을 의미하지 않습니다."
+            "민감도 분석은 모델 예측값의 변화를 보여주는 것이며, "
+            "해당 행동이 실제 GPA 변화의 원인임을 의미하지 않습니다."
         )
 
 
 # =========================
-# 3. 미래 시뮬레이션
+# 탭 3: 미래 시뮬레이션
 # =========================
 with tab3:
     st.header("미래 생활계획 시뮬레이션")
 
     st.write("""
-    현재 생활습관과 앞으로 실천할 계획을 비교하여
-    모델의 예상 GPA가 어떻게 달라지는지 확인합니다.
+    현재 생활습관과 앞으로 실천할 미래 계획을 비교하여
+    예상 GPA가 어떻게 달라지는지 확인합니다.
     """)
 
     if st.session_state.current_values is None:
@@ -613,9 +557,7 @@ with tab3:
                 "계획 신체활동 시간",
                 min_value=0.0,
                 max_value=8.0,
-                value=float(
-                    current["physical_activity"]
-                ),
+                value=float(current["physical_activity"]),
                 step=0.5,
                 key="future_activity"
             )
@@ -638,97 +580,31 @@ with tab3:
             "stress": future_stress
         }
 
-        future_total_hours = validate_daily_hours(
+        future_total_hours = calculate_total_hours(
             future_values
         )
 
         if future_total_hours > 24:
             st.warning(
-                f"미래 계획의 주요 시간 합이 "
+                f"미래 계획의 시간형 항목 합이 "
                 f"{future_total_hours:.1f}시간입니다. "
-                "하루 24시간을 초과하므로 계획을 다시 확인해 주세요."
+                "하루 24시간을 초과하므로 입력값을 다시 확인해 주세요."
             )
 
-        if st.button(
+        compare_button = st.button(
             "현재 계획과 비교하기",
             type="primary"
-        ):
+        )
+
+        if compare_button:
             try:
                 comparison_result = compare_plans(
                     current,
-                    future_values,
-                    lr_model,
-                    scaler
+                    future_values
                 )
 
-                st.divider()
-                st.subheader("시뮬레이션 결과")
-
-                metric_col1, metric_col2, metric_col3 = (
-                    st.columns(3)
-                )
-
-                with metric_col1:
-                    st.metric(
-                        "현재 예상 GPA",
-                        f"{comparison_result['current_gpa']:.2f}"
-                    )
-
-                with metric_col2:
-                    st.metric(
-                        "미래 계획 예상 GPA",
-                        f"{comparison_result['future_gpa']:.2f}"
-                    )
-
-                with metric_col3:
-                    st.metric(
-                        "예상 변화",
-                        f"{comparison_result['gpa_change']:+.2f}"
-                    )
-
-                comparison_df = (
-                    comparison_result["comparison_df"].copy()
-                )
-
-                comparison_df["현재"] = comparison_df[
-                    "현재"
-                ].map(lambda value: f"{value:.1f}")
-
-                comparison_df["미래 계획"] = comparison_df[
-                    "미래 계획"
-                ].map(lambda value: f"{value:.1f}")
-
-                comparison_df["변화"] = comparison_df[
-                    "변화"
-                ].map(lambda value: f"{value:+.1f}")
-
-                st.dataframe(
-                    comparison_df,
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-                if comparison_result["gpa_change"] > 0:
-                    st.success(
-                        "현재 계획보다 미래 계획의 "
-                        "예상 GPA가 높게 나타났습니다."
-                    )
-
-                elif comparison_result["gpa_change"] < 0:
-                    st.warning(
-                        "미래 계획의 예상 GPA가 "
-                        "현재 계획보다 낮게 나타났습니다."
-                    )
-
-                else:
-                    st.info(
-                        "현재 계획과 미래 계획의 "
-                        "예상 GPA가 동일하게 나타났습니다."
-                    )
-
-                st.caption(
-                    "시뮬레이션 결과는 모델이 학습한 패턴을 "
-                    "바탕으로 한 예측이며 실제 결과를 보장하지 않습니다."
+                st.session_state.comparison_result = (
+                    comparison_result
                 )
 
             except Exception as error:
@@ -737,9 +613,91 @@ with tab3:
                 )
                 st.exception(error)
 
+        if st.session_state.comparison_result is not None:
+            comparison_result = (
+                st.session_state.comparison_result
+            )
+
+            st.divider()
+            st.subheader("시뮬레이션 결과")
+
+            metric_col1, metric_col2, metric_col3 = (
+                st.columns(3)
+            )
+
+            with metric_col1:
+                st.metric(
+                    "현재 예상 GPA",
+                    f"{comparison_result['current_gpa']:.2f}"
+                )
+
+            with metric_col2:
+                st.metric(
+                    "미래 계획 예상 GPA",
+                    f"{comparison_result['future_gpa']:.2f}"
+                )
+
+            with metric_col3:
+                st.metric(
+                    "예상 변화",
+                    f"{comparison_result['gpa_change']:+.2f}"
+                )
+
+            comparison_df = (
+                comparison_result["comparison_df"].copy()
+            )
+
+            display_comparison_df = comparison_df.copy()
+
+            display_comparison_df["현재"] = (
+                display_comparison_df["현재"]
+                .map(lambda value: f"{value:.1f}")
+            )
+
+            display_comparison_df["미래 계획"] = (
+                display_comparison_df["미래 계획"]
+                .map(lambda value: f"{value:.1f}")
+            )
+
+            display_comparison_df["변화"] = (
+                display_comparison_df["변화"]
+                .map(lambda value: f"{value:+.1f}")
+            )
+
+            st.dataframe(
+                display_comparison_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            gpa_change = comparison_result["gpa_change"]
+
+            if gpa_change > 0:
+                st.success(
+                    "현재 계획보다 미래 계획의 "
+                    "예상 GPA가 높게 나타났습니다."
+                )
+
+            elif gpa_change < 0:
+                st.warning(
+                    "미래 계획의 예상 GPA가 "
+                    "현재 계획보다 낮게 나타났습니다."
+                )
+
+            else:
+                st.info(
+                    "현재 계획과 미래 계획의 "
+                    "예상 GPA가 동일하게 나타났습니다."
+                )
+
+            st.caption(
+                "시뮬레이션 결과는 모델이 학습한 통계적 패턴을 "
+                "바탕으로 한 예측이며 실제 결과를 보장하지 않습니다."
+            )
+
 
 # =========================
-# 4. 프로젝트 설명
+# 탭 4: 프로젝트 설명
 # =========================
 with tab4:
     st.header("프로젝트 설명")
@@ -749,8 +707,8 @@ with tab4:
     st.write("""
     Campus Twin은 대학생의 생활습관을 입력받아
     예상 GPA를 계산하고,
-    생활계획의 변화가 예측 결과에 미치는 영향을
-    가상으로 비교하는 AI 기반 프로토타입입니다.
+    미래 생활계획의 변화가 예측 결과에 미치는 영향을
+    가상으로 비교하는 웹서비스입니다.
     """)
 
     st.subheader("사용 변수")
@@ -784,14 +742,11 @@ with tab4:
 
     st.write("- GPA")
 
-    st.subheader("비교 모델")
+    st.subheader("사용 모델")
 
-    st.write("""
-    - Linear Regression
-    - DNN Regression
-    """)
+    st.write("- Linear Regression")
 
-    st.subheader("평가 지표")
+    st.subheader("모델 평가 지표")
 
     st.write("""
     - MSE
@@ -804,9 +759,10 @@ with tab4:
 
     st.write("""
     - 생활습관 기반 GPA 예측
-    - Linear Regression과 DNN 예측 비교
-    - 생활요인별 민감도 분석
+    - 개인별 민감도 분석
+    - 생활요인 변화량 시각화
     - 현재 생활과 미래 생활계획 비교
+    - 비현실적인 시간 입력 경고
     """)
 
     st.subheader("한계 및 주의사항")
