@@ -8,28 +8,67 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from openpyxl import Workbook
-from openpyxl.styles import (
-    Alignment,
-    Border,
-    Font,
-    PatternFill,
-    Side
-)
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
 # =========================================================
-# 페이지 설정
+# 기본 설정
 # =========================================================
 st.set_page_config(
     page_title="Campus Twin",
     page_icon="🎓",
-    layout="wide"
+    layout="wide",
 )
+
+MODEL_TARGET_MIN = 0.0
+MODEL_TARGET_MAX = 2.009058
+DISPLAY_SCORE_MAX = 4.5
+EPSILON = 1e-8
+
+DAYS = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+
+FEATURE_COLS = [
+    "study_hours",
+    "attendance",
+    "sleep_hours",
+    "screen_time",
+    "physical_activity",
+    "stress",
+]
+
+FEATURE_LABELS = {
+    "study_hours": "공부 시간",
+    "attendance": "출석률",
+    "sleep_hours": "수면 시간",
+    "screen_time": "스크린타임",
+    "physical_activity": "신체활동",
+    "stress": "스트레스",
+}
+
+FEATURE_UNITS = {
+    "study_hours": "시간",
+    "attendance": "%",
+    "sleep_hours": "시간",
+    "screen_time": "시간",
+    "physical_activity": "시간",
+    "stress": "단계",
+}
+
+LABEL_TO_FEATURE = {label: feature for feature, label in FEATURE_LABELS.items()}
+
+SENSITIVITY_SETTINGS = {
+    "study_hours": (1.0, 0.0, 12.0, "공부 시간 1시간 증가"),
+    "attendance": (5.0, 0.0, 100.0, "출석률 5% 증가"),
+    "sleep_hours": (1.0, 0.0, 12.0, "수면 시간 1시간 증가"),
+    "screen_time": (-1.0, 0.0, 16.0, "스크린타임 1시간 감소"),
+    "physical_activity": (1.0, 0.0, 8.0, "신체활동 1시간 증가"),
+    "stress": (-1.0, 1.0, 10.0, "스트레스 1단계 감소"),
+}
 
 
 # =========================================================
-# 사용자 정의 스타일
+# 화면 스타일
 # =========================================================
 st.markdown(
     """
@@ -39,96 +78,55 @@ st.markdown(
         border-radius: 14px;
         padding: 20px;
         min-height: 420px;
-        background-color: #ffffff;
+        background: #ffffff;
         margin-bottom: 10px;
         overflow-wrap: break-word;
     }
-
     .recommendation-card-selected {
         border: 3px solid #ff4b4b;
         border-radius: 14px;
         padding: 18px;
         min-height: 420px;
-        background-color: #fff5f5;
+        background: #fff5f5;
         box-shadow: 0 4px 14px rgba(255, 75, 75, 0.16);
         margin-bottom: 10px;
         overflow-wrap: break-word;
     }
-
-    .card-title {
-        font-size: 1.45rem;
-        font-weight: 700;
-        margin-bottom: 14px;
-    }
-
-    .card-score-label {
-        font-size: 0.95rem;
-        margin-bottom: 4px;
-    }
-
-    .card-score {
-        font-size: 1.8rem;
-        font-weight: 700;
-        margin-bottom: 8px;
-    }
-
-    .card-delta-positive {
-        color: #11823b;
-        font-weight: 700;
-        margin-bottom: 14px;
-    }
-
+    .card-title {font-size: 1.45rem; font-weight: 700; margin-bottom: 14px;}
+    .card-score-label {font-size: .95rem; margin-bottom: 4px;}
+    .card-score {font-size: 1.8rem; font-weight: 700; margin-bottom: 8px;}
+    .card-delta-positive {color: #11823b; font-weight: 700; margin-bottom: 14px;}
     .card-reason {
-        background-color: #eaf3ff;
+        background: #eaf3ff;
         border-radius: 9px;
         padding: 12px;
-        margin-top: 12px;
-        margin-bottom: 10px;
+        margin: 12px 0 10px;
     }
-
     .selected-badge {
         display: inline-block;
         padding: 4px 9px;
         margin-bottom: 10px;
         border-radius: 20px;
-        background-color: #ff4b4b;
+        background: #ff4b4b;
         color: white;
-        font-size: 0.85rem;
+        font-size: .85rem;
         font-weight: 700;
     }
-
-    .difficulty-box-low {
-        background-color: #eaf8ef;
-        border-left: 5px solid #2ca25f;
+    .difficulty-low, .difficulty-medium, .difficulty-high {
         border-radius: 8px;
         padding: 14px;
         margin-top: 10px;
     }
-
-    .difficulty-box-medium {
-        background-color: #fff8df;
-        border-left: 5px solid #e6a700;
-        border-radius: 8px;
-        padding: 14px;
-        margin-top: 10px;
-    }
-
-    .difficulty-box-high {
-        background-color: #fff0f0;
-        border-left: 5px solid #d94343;
-        border-radius: 8px;
-        padding: 14px;
-        margin-top: 10px;
-    }
-
+    .difficulty-low {background: #eaf8ef; border-left: 5px solid #2ca25f;}
+    .difficulty-medium {background: #fff8df; border-left: 5px solid #e6a700;}
+    .difficulty-high {background: #fff0f0; border-left: 5px solid #d94343;}
     .step-card {
         border: 1px solid #d9dee8;
         border-radius: 12px;
         padding: 16px;
-        background-color: #fafbfc;
+        background: #fafbfc;
         min-height: 230px;
     }
-
     .progress-summary {
         text-align: center;
         font-size: 1.15rem;
@@ -137,1703 +135,682 @@ st.markdown(
     }
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# 모델 및 점수 설정
-# =========================================================
-MODEL_TARGET_MIN = 0.0
-MODEL_TARGET_MAX = 2.009058
-DISPLAY_SCORE_MAX = 4.5
-EPSILON = 1e-8
-
-DAYS = [
-    "월요일",
-    "화요일",
-    "수요일",
-    "목요일",
-    "금요일",
-    "토요일",
-    "일요일"
-]
-
-
-# =========================================================
-# 엑셀 스타일 설정
-# =========================================================
-EXCEL_TITLE_FILL = PatternFill(
-    fill_type="solid",
-    fgColor="1F4E78"
-)
-
-EXCEL_SUBTITLE_FILL = PatternFill(
-    fill_type="solid",
-    fgColor="D9EAF7"
-)
-
-EXCEL_HEADER_FILL = PatternFill(
-    fill_type="solid",
-    fgColor="5B9BD5"
-)
-
-EXCEL_LIGHT_BLUE_FILL = PatternFill(
-    fill_type="solid",
-    fgColor="EAF3F8"
-)
-
-EXCEL_GREEN_FILL = PatternFill(
-    fill_type="solid",
-    fgColor="E2F0D9"
-)
-
-EXCEL_YELLOW_FILL = PatternFill(
-    fill_type="solid",
-    fgColor="FFF2CC"
-)
-
-EXCEL_RED_FILL = PatternFill(
-    fill_type="solid",
-    fgColor="FCE4D6"
-)
-
-EXCEL_GRAY_FILL = PatternFill(
-    fill_type="solid",
-    fgColor="F2F2F2"
-)
-
-EXCEL_WHITE_FONT = Font(
-    color="FFFFFF",
-    bold=True
-)
-
-EXCEL_TITLE_FONT = Font(
-    color="FFFFFF",
-    bold=True,
-    size=18
-)
-
-EXCEL_SUBTITLE_FONT = Font(
-    color="1F1F1F",
-    bold=True,
-    size=11
-)
-
-EXCEL_HEADER_FONT = Font(
-    color="FFFFFF",
-    bold=True
-)
-
-EXCEL_SECTION_FONT = Font(
-    bold=True,
-    size=13,
-    color="1F4E78"
-)
-
-EXCEL_NORMAL_FONT = Font(
-    size=10
-)
-
-EXCEL_THIN_SIDE = Side(
-    style="thin",
-    color="D9E1F2"
-)
-
-EXCEL_BORDER = Border(
-    left=EXCEL_THIN_SIDE,
-    right=EXCEL_THIN_SIDE,
-    top=EXCEL_THIN_SIDE,
-    bottom=EXCEL_THIN_SIDE
-)
-
-
-# =========================================================
-# 모델 불러오기
+# 모델
 # =========================================================
 @st.cache_resource
 def load_models():
-    model = joblib.load("lr_model.pkl")
-    scaler = joblib.load("scaler.pkl")
-
-    return model, scaler
+    return joblib.load("lr_model.pkl"), joblib.load("scaler.pkl")
 
 
 try:
     lr_model, scaler = load_models()
-
 except Exception as error:
-    st.error(
-        "모델 파일을 불러오지 못했습니다. "
-        "lr_model.pkl과 scaler.pkl 파일을 확인해 주세요."
-    )
+    st.error("모델 파일을 불러오지 못했습니다. lr_model.pkl과 scaler.pkl을 확인해 주세요.")
     st.exception(error)
     st.stop()
 
 
-# =========================================================
-# 변수 설정
-# =========================================================
-FEATURE_COLS = [
-    "study_hours",
-    "attendance",
-    "sleep_hours",
-    "screen_time",
-    "physical_activity",
-    "stress"
-]
-
-FEATURE_LABELS = {
-    "study_hours": "공부 시간",
-    "attendance": "출석률",
-    "sleep_hours": "수면 시간",
-    "screen_time": "스크린타임",
-    "physical_activity": "신체활동",
-    "stress": "스트레스"
-}
-
-FEATURE_UNITS = {
-    "study_hours": "시간",
-    "attendance": "%",
-    "sleep_hours": "시간",
-    "screen_time": "시간",
-    "physical_activity": "시간",
-    "stress": "단계"
-}
-
-LABEL_TO_FEATURE = {
-    label: feature
-    for feature, label in FEATURE_LABELS.items()
-}
+def make_input_df(values):
+    missing = [column for column in FEATURE_COLS if column not in values]
+    if missing:
+        raise ValueError(f"필요한 입력 컬럼이 없습니다: {missing}")
+    return pd.DataFrame([values])[FEATURE_COLS]
 
 
-SENSITIVITY_SETTINGS = {
-    "study_hours": {
-        "change": 1.0,
-        "min": 0.0,
-        "max": 12.0,
-        "description": "공부 시간 1시간 증가"
-    },
-    "attendance": {
-        "change": 5.0,
-        "min": 0.0,
-        "max": 100.0,
-        "description": "출석률 5% 증가"
-    },
-    "sleep_hours": {
-        "change": 1.0,
-        "min": 0.0,
-        "max": 12.0,
-        "description": "수면 시간 1시간 증가"
-    },
-    "screen_time": {
-        "change": -1.0,
-        "min": 0.0,
-        "max": 16.0,
-        "description": "스크린타임 1시간 감소"
-    },
-    "physical_activity": {
-        "change": 1.0,
-        "min": 0.0,
-        "max": 8.0,
-        "description": "신체활동 1시간 증가"
-    },
-    "stress": {
-        "change": -1.0,
-        "min": 1.0,
-        "max": 10.0,
-        "description": "스트레스 1단계 감소"
-    }
-}
-
-
-# =========================================================
-# 예측 관련 함수
-# =========================================================
-def make_input_df(user_values):
-    input_df = pd.DataFrame([user_values])
-
-    missing_cols = [
-        column
-        for column in FEATURE_COLS
-        if column not in input_df.columns
-    ]
-
-    if missing_cols:
-        raise ValueError(
-            f"필요한 입력 컬럼이 없습니다: {missing_cols}"
-        )
-
-    return input_df[FEATURE_COLS]
-
-
-def convert_to_display_score(model_score):
-    clipped_score = np.clip(
-        model_score,
-        MODEL_TARGET_MIN,
-        MODEL_TARGET_MAX
-    )
-
-    converted_score = (
-        (clipped_score - MODEL_TARGET_MIN)
+def convert_to_display_score(raw_score):
+    clipped = np.clip(raw_score, MODEL_TARGET_MIN, MODEL_TARGET_MAX)
+    converted = (
+        (clipped - MODEL_TARGET_MIN)
         / (MODEL_TARGET_MAX - MODEL_TARGET_MIN)
         * DISPLAY_SCORE_MAX
     )
-
-    return float(
-        np.clip(
-            converted_score,
-            0.0,
-            DISPLAY_SCORE_MAX
-        )
-    )
+    return float(np.clip(converted, 0.0, DISPLAY_SCORE_MAX))
 
 
-def predict_score(input_df):
-    input_scaled = scaler.transform(input_df)
-    prediction = lr_model.predict(input_scaled)
-
-    raw_score = float(
-        np.asarray(prediction).reshape(-1)[0]
-    )
-
-    raw_score = float(
-        np.clip(
-            raw_score,
-            MODEL_TARGET_MIN,
-            MODEL_TARGET_MAX
-        )
-    )
-
+def predict_from_values(values):
+    input_df = make_input_df(values)
+    scaled = scaler.transform(input_df)
+    prediction = lr_model.predict(scaled)
+    raw_score = float(np.asarray(prediction).reshape(-1)[0])
+    raw_score = float(np.clip(raw_score, MODEL_TARGET_MIN, MODEL_TARGET_MAX))
     return {
         "raw_score": raw_score,
-        "display_score": convert_to_display_score(
-            raw_score
-        )
+        "display_score": convert_to_display_score(raw_score),
     }
 
 
-def predict_from_values(user_values):
-    return predict_score(
-        make_input_df(user_values)
-    )
-
-
-def calculate_total_hours(user_values):
+def calculate_total_hours(values):
     return (
-        user_values["study_hours"]
-        + user_values["sleep_hours"]
-        + user_values["screen_time"]
-        + user_values["physical_activity"]
+        values["study_hours"]
+        + values["sleep_hours"]
+        + values["screen_time"]
+        + values["physical_activity"]
     )
 
 
 def create_range(start, stop, step):
     if stop < start:
         return np.array([float(start)])
-
-    values = np.arange(
-        start,
-        stop + step / 2,
-        step
-    )
-
-    return np.round(values, 2)
+    return np.round(np.arange(start, stop + step / 2, step), 2)
 
 
 # =========================================================
-# 민감도 분석 및 비교
+# 분석
 # =========================================================
-def analyze_sensitivity(user_values):
-    base_prediction = predict_from_values(
-        user_values
-    )
+def analyze_sensitivity(values):
+    base = predict_from_values(values)
+    rows = []
 
-    results = []
+    for feature, (change, min_value, max_value, description) in SENSITIVITY_SETTINGS.items():
+        changed = values.copy()
+        changed[feature] = float(np.clip(changed[feature] + change, min_value, max_value))
+        prediction = predict_from_values(changed)
 
-    for feature, setting in SENSITIVITY_SETTINGS.items():
-        changed_values = user_values.copy()
-
-        changed_value = float(
-            np.clip(
-                changed_values[feature]
-                + setting["change"],
-                setting["min"],
-                setting["max"]
-            )
+        rows.append(
+            {
+                "생활요인 변화": description,
+                "현재 값": values[feature],
+                "변경 값": changed[feature],
+                "변경 후 환산 점수": prediction["display_score"],
+                "환산 점수 변화량": prediction["display_score"] - base["display_score"],
+                "원본 점수 변화량": prediction["raw_score"] - base["raw_score"],
+            }
         )
 
-        changed_values[feature] = changed_value
-
-        changed_prediction = predict_from_values(
-            changed_values
-        )
-
-        results.append({
-            "생활요인 변화": setting["description"],
-            "현재 값": user_values[feature],
-            "변경 값": changed_value,
-            "변경 후 환산 점수": (
-                changed_prediction["display_score"]
-            ),
-            "환산 점수 변화량": (
-                changed_prediction["display_score"]
-                - base_prediction["display_score"]
-            ),
-            "원본 점수 변화량": (
-                changed_prediction["raw_score"]
-                - base_prediction["raw_score"]
-            )
-        })
-
-    result_df = pd.DataFrame(results)
-
-    return result_df.sort_values(
-        "환산 점수 변화량",
-        ascending=False
-    ).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("환산 점수 변화량", ascending=False).reset_index(drop=True)
 
 
-def compare_plans(current_values, future_values):
-    current_prediction = predict_from_values(
-        current_values
-    )
+def compare_plans(current, future):
+    current_prediction = predict_from_values(current)
+    future_prediction = predict_from_values(future)
 
-    future_prediction = predict_from_values(
-        future_values
-    )
-
-    comparison_rows = []
-
-    for feature in FEATURE_COLS:
-        comparison_rows.append({
+    rows = [
+        {
             "생활요인": FEATURE_LABELS[feature],
-            "현재": current_values[feature],
-            "미래 계획": future_values[feature],
-            "변화": (
-                future_values[feature]
-                - current_values[feature]
-            ),
-            "단위": FEATURE_UNITS[feature]
-        })
+            "현재": current[feature],
+            "미래 계획": future[feature],
+            "변화": future[feature] - current[feature],
+            "단위": FEATURE_UNITS[feature],
+        }
+        for feature in FEATURE_COLS
+    ]
 
     return {
         "current_raw_score": current_prediction["raw_score"],
         "future_raw_score": future_prediction["raw_score"],
-        "current_display_score": (
-            current_prediction["display_score"]
-        ),
-        "future_display_score": (
-            future_prediction["display_score"]
-        ),
+        "current_display_score": current_prediction["display_score"],
+        "future_display_score": future_prediction["display_score"],
         "display_score_change": (
-            future_prediction["display_score"]
-            - current_prediction["display_score"]
+            future_prediction["display_score"] - current_prediction["display_score"]
         ),
-        "comparison_df": pd.DataFrame(
-            comparison_rows
-        )
+        "comparison_df": pd.DataFrame(rows),
     }
 
 
 # =========================================================
 # 추천 알고리즘
 # =========================================================
-def calculate_change_cost(
-    current_values,
-    candidate_values
-):
-    normalized_changes = {
-        "study_hours": (
-            abs(
-                candidate_values["study_hours"]
-                - current_values["study_hours"]
-            ) / 12.0
-        ),
-        "attendance": (
-            abs(
-                candidate_values["attendance"]
-                - current_values["attendance"]
-            ) / 100.0
-        ),
-        "sleep_hours": (
-            abs(
-                candidate_values["sleep_hours"]
-                - current_values["sleep_hours"]
-            ) / 12.0
-        ),
-        "screen_time": (
-            abs(
-                candidate_values["screen_time"]
-                - current_values["screen_time"]
-            ) / 16.0
-        ),
-        "physical_activity": (
-            abs(
-                candidate_values["physical_activity"]
-                - current_values["physical_activity"]
-            ) / 8.0
-        ),
-        "stress": (
-            abs(
-                candidate_values["stress"]
-                - current_values["stress"]
-            ) / 9.0
-        )
+def calculate_change_cost(current, candidate):
+    denominators = {
+        "study_hours": 12.0,
+        "attendance": 100.0,
+        "sleep_hours": 12.0,
+        "screen_time": 16.0,
+        "physical_activity": 8.0,
+        "stress": 9.0,
     }
-
     return float(
-        sum(normalized_changes.values())
+        sum(abs(candidate[f] - current[f]) / denominators[f] for f in FEATURE_COLS)
     )
 
 
-def describe_change_cost(change_cost):
-    if change_cost < 0.08:
+def describe_change_cost(cost):
+    if cost < 0.08:
         return "낮음"
-
-    if change_cost < 0.18:
+    if cost < 0.18:
         return "보통"
-
     return "높음"
 
 
-def calculate_difficulty_score(change_cost):
-    difficulty = int(
-        np.ceil(change_cost * 12)
-    )
+def calculate_difficulty_score(cost):
+    return int(np.clip(np.ceil(cost * 12), 1, 5))
 
-    return int(
-        np.clip(
-            difficulty,
-            1,
-            5
+
+def describe_difficulty(score):
+    return {1: "매우 쉬움", 2: "쉬움", 3: "보통", 4: "어려움", 5: "매우 어려움"}[score]
+
+
+def get_difficulty_message(score):
+    if score <= 2:
+        return (
+            "difficulty-low",
+            "무리 없이 시작할 수 있는 계획입니다.",
+            "현재 생활과의 차이가 크지 않아 이번 주부터 시작해도 부담이 비교적 적습니다.",
         )
-    )
-
-
-def describe_difficulty(difficulty_score):
-    descriptions = {
-        1: "매우 쉬움",
-        2: "쉬움",
-        3: "보통",
-        4: "어려움",
-        5: "매우 어려움"
-    }
-
-    return descriptions.get(
-        difficulty_score,
-        "보통"
-    )
-
-
-def get_difficulty_message(difficulty_score):
-    if difficulty_score <= 2:
-        return {
-            "class_name": "difficulty-box-low",
-            "title": "무리 없이 시작할 수 있는 계획입니다.",
-            "message": (
-                "현재 생활과의 차이가 크지 않습니다. "
-                "이번 주부터 목표 수준으로 실천해도 부담이 비교적 적습니다."
-            )
-        }
-
-    if difficulty_score == 3:
-        return {
-            "class_name": "difficulty-box-medium",
-            "title": "일정 조정이 필요한 계획입니다.",
-            "message": (
-                "한 번에 모든 목표를 적용하기보다 "
-                "공부·수면·출석 계획을 단계적으로 조정하는 것이 좋습니다."
-            )
-        }
-
-    return {
-        "class_name": "difficulty-box-high",
-        "title": "단계적으로 실행할 것을 권장합니다.",
-        "message": (
-            "생활 변화 폭이 큰 계획입니다. "
-            "3주 단계적 계획을 따라 목표 수준에 천천히 도달하세요."
+    if score == 3:
+        return (
+            "difficulty-medium",
+            "일정 조정이 필요한 계획입니다.",
+            "한 번에 모든 목표를 적용하기보다 공부·수면·출석 계획을 단계적으로 조정하세요.",
         )
-    }
-
-
-def is_same_plan(first_plan, second_plan):
-    return all(
-        abs(
-            float(first_plan[feature])
-            - float(second_plan[feature])
-        ) < EPSILON
-        for feature in FEATURE_COLS
+    return (
+        "difficulty-high",
+        "단계적으로 실행할 것을 권장합니다.",
+        "생활 변화 폭이 큽니다. 3주 단계계획을 따라 목표 수준에 천천히 도달하세요.",
     )
 
 
-def has_any_change(
-    current_values,
-    candidate_values
-):
-    return not is_same_plan(
-        current_values,
-        candidate_values
-    )
+def has_any_change(current, candidate):
+    return any(abs(float(current[f]) - float(candidate[f])) >= EPSILON for f in FEATURE_COLS)
 
 
 def generate_candidate_values(
-    current_values,
+    current,
     changeable_features,
     max_study,
     min_sleep,
     max_screen_reduction,
-    max_attendance_increase
+    max_attendance_increase,
 ):
-    if "study_hours" in changeable_features:
-        study_stop = min(
-            max_study,
-            current_values["study_hours"] + 2.0,
-            12.0
-        )
-
-        study_values = create_range(
-            current_values["study_hours"],
-            study_stop,
-            0.5
-        )
-
-    else:
-        study_values = np.array([
-            current_values["study_hours"]
-        ])
+    study = (
+        create_range(current["study_hours"], min(max_study, current["study_hours"] + 2.0, 12.0), 0.5)
+        if "study_hours" in changeable_features
+        else np.array([current["study_hours"]])
+    )
 
     if "sleep_hours" in changeable_features:
-        sleep_start = max(
-            current_values["sleep_hours"],
-            min_sleep
+        sleep_start = max(current["sleep_hours"], min_sleep)
+        sleep_stop = min(12.0, current["sleep_hours"] + 1.5)
+        sleep = (
+            create_range(sleep_start, sleep_stop, 0.5)
+            if sleep_start <= sleep_stop
+            else np.array([current["sleep_hours"]])
         )
-
-        sleep_stop = min(
-            12.0,
-            current_values["sleep_hours"] + 1.5
-        )
-
-        if sleep_start > sleep_stop:
-            sleep_values = np.array([
-                current_values["sleep_hours"]
-            ])
-
-        else:
-            sleep_values = create_range(
-                sleep_start,
-                sleep_stop,
-                0.5
-            )
-
     else:
-        sleep_values = np.array([
-            current_values["sleep_hours"]
-        ])
+        sleep = np.array([current["sleep_hours"]])
 
-    if "screen_time" in changeable_features:
-        screen_start = max(
-            0.0,
-            current_values["screen_time"]
-            - max_screen_reduction
+    screen = (
+        create_range(
+            max(0.0, current["screen_time"] - max_screen_reduction),
+            current["screen_time"],
+            0.5,
         )
+        if "screen_time" in changeable_features
+        else np.array([current["screen_time"]])
+    )
 
-        screen_values = create_range(
-            screen_start,
-            current_values["screen_time"],
-            0.5
+    attendance = (
+        create_range(
+            current["attendance"],
+            min(100.0, current["attendance"] + max_attendance_increase),
+            1.0,
         )
-
-    else:
-        screen_values = np.array([
-            current_values["screen_time"]
-        ])
-
-    if "attendance" in changeable_features:
-        attendance_stop = min(
-            100.0,
-            current_values["attendance"]
-            + max_attendance_increase
-        )
-
-        attendance_values = create_range(
-            current_values["attendance"],
-            attendance_stop,
-            1.0
-        )
-
-    else:
-        attendance_values = np.array([
-            current_values["attendance"]
-        ])
+        if "attendance" in changeable_features
+        else np.array([current["attendance"]])
+    )
 
     return {
-        "study_hours": study_values,
-        "attendance": attendance_values,
-        "sleep_hours": sleep_values,
-        "screen_time": screen_values
+        "study_hours": study,
+        "attendance": attendance,
+        "sleep_hours": sleep,
+        "screen_time": screen,
     }
 
 
 def generate_recommendation_candidates(
-    current_values,
+    current,
     target_score,
     changeable_features,
     max_study,
     min_sleep,
     max_screen_reduction,
-    max_attendance_increase
+    max_attendance_increase,
 ):
-    candidate_values = generate_candidate_values(
-        current_values=current_values,
-        changeable_features=changeable_features,
-        max_study=max_study,
-        min_sleep=min_sleep,
-        max_screen_reduction=max_screen_reduction,
-        max_attendance_increase=max_attendance_increase
+    values = generate_candidate_values(
+        current,
+        changeable_features,
+        max_study,
+        min_sleep,
+        max_screen_reduction,
+        max_attendance_increase,
     )
+    current_prediction = predict_from_values(current)
+    rows = []
 
-    current_prediction = predict_from_values(
-        current_values
-    )
-
-    candidates = []
-
-    combinations = product(
-        candidate_values["study_hours"],
-        candidate_values["attendance"],
-        candidate_values["sleep_hours"],
-        candidate_values["screen_time"]
-    )
-
-    for (
-        study_hours,
-        attendance,
-        sleep_hours,
-        screen_time
-    ) in combinations:
-
-        candidate = current_values.copy()
-
-        candidate["study_hours"] = float(
-            study_hours
-        )
-        candidate["attendance"] = float(
-            attendance
-        )
-        candidate["sleep_hours"] = float(
-            sleep_hours
-        )
-        candidate["screen_time"] = float(
-            screen_time
+    for study, attendance, sleep, screen in product(
+        values["study_hours"],
+        values["attendance"],
+        values["sleep_hours"],
+        values["screen_time"],
+    ):
+        candidate = current.copy()
+        candidate.update(
+            {
+                "study_hours": float(study),
+                "attendance": float(attendance),
+                "sleep_hours": float(sleep),
+                "screen_time": float(screen),
+            }
         )
 
-        total_hours = calculate_total_hours(
-            candidate
-        )
-
+        total_hours = calculate_total_hours(candidate)
         if total_hours > 24:
             continue
 
-        prediction = predict_from_values(
-            candidate
+        prediction = predict_from_values(candidate)
+        cost = calculate_change_cost(current, candidate)
+        difficulty = calculate_difficulty_score(cost)
+
+        rows.append(
+            {
+                **candidate,
+                "예상 환산 점수": prediction["display_score"],
+                "원본 예측 점수": prediction["raw_score"],
+                "현재 대비 점수 변화": prediction["display_score"] - current_prediction["display_score"],
+                "변화 부담 수치": cost,
+                "변화 부담": describe_change_cost(cost),
+                "실행 난이도 점수": difficulty,
+                "실행 난이도": describe_difficulty(difficulty),
+                "목표 달성": prediction["display_score"] >= target_score,
+                "현재와 다른 계획": has_any_change(current, candidate),
+                "현재보다 개선": prediction["display_score"] > current_prediction["display_score"] + EPSILON,
+                "주요 생활시간 합계": total_hours,
+            }
         )
 
-        change_cost = calculate_change_cost(
-            current_values,
-            candidate
-        )
-
-        difficulty_score = (
-            calculate_difficulty_score(
-                change_cost
-            )
-        )
-
-        candidates.append({
-            "study_hours": candidate["study_hours"],
-            "attendance": candidate["attendance"],
-            "sleep_hours": candidate["sleep_hours"],
-            "screen_time": candidate["screen_time"],
-            "physical_activity": (
-                candidate["physical_activity"]
-            ),
-            "stress": candidate["stress"],
-            "예상 환산 점수": (
-                prediction["display_score"]
-            ),
-            "원본 예측 점수": (
-                prediction["raw_score"]
-            ),
-            "현재 대비 점수 변화": (
-                prediction["display_score"]
-                - current_prediction["display_score"]
-            ),
-            "변화 부담 수치": change_cost,
-            "변화 부담": describe_change_cost(
-                change_cost
-            ),
-            "실행 난이도 점수": difficulty_score,
-            "실행 난이도": describe_difficulty(
-                difficulty_score
-            ),
-            "목표 달성": (
-                prediction["display_score"]
-                >= target_score
-            ),
-            "현재와 다른 계획": has_any_change(
-                current_values,
-                candidate
-            ),
-            "현재보다 개선": (
-                prediction["display_score"]
-                > current_prediction["display_score"]
-                + EPSILON
-            ),
-            "주요 생활시간 합계": total_hours
-        })
-
-    return pd.DataFrame(candidates)
+    return pd.DataFrame(rows)
 
 
 def plan_key(row):
-    return tuple(
-        round(float(row[feature]), 4)
-        for feature in FEATURE_COLS
-    )
+    return tuple(round(float(row[f]), 4) for f in FEATURE_COLS)
 
 
-def choose_unique_row(
-    sorted_dataframe,
-    used_plan_keys
-):
-    for _, row in sorted_dataframe.iterrows():
+def choose_unique_row(dataframe, used_keys):
+    for _, row in dataframe.iterrows():
         key = plan_key(row)
-
-        if key not in used_plan_keys:
-            used_plan_keys.add(key)
+        if key not in used_keys:
+            used_keys.add(key)
             return row
-
     return None
 
 
-def select_recommendations(
-    candidates,
-    target_score
-):
+def select_recommendations(candidates, target_score):
+    empty_result = {
+        "target_reached": False,
+        "recommendations": pd.DataFrame(),
+        "candidate_pool_type": "후보 없음",
+    }
     if candidates.empty:
-        return {
-            "target_reached": False,
-            "recommendations": pd.DataFrame(),
-            "candidate_pool_type": "후보 없음"
-        }
+        return empty_result
 
-    changed_candidates = candidates[
-        candidates["현재와 다른 계획"]
-    ].copy()
+    changed = candidates[candidates["현재와 다른 계획"]].copy()
+    if changed.empty:
+        return {**empty_result, "candidate_pool_type": "변경 후보 없음"}
 
-    if changed_candidates.empty:
-        return {
-            "target_reached": False,
-            "recommendations": pd.DataFrame(),
-            "candidate_pool_type": "변경 후보 없음"
-        }
-
-    reached_candidates = changed_candidates[
-        changed_candidates["예상 환산 점수"]
-        >= target_score
-    ].copy()
-
-    target_reached = not reached_candidates.empty
+    reached = changed[changed["예상 환산 점수"] >= target_score].copy()
+    target_reached = not reached.empty
 
     if target_reached:
-        selection_pool = reached_candidates.copy()
-        candidate_pool_type = "목표 달성 후보"
-
+        pool = reached
+        pool_type = "목표 달성 후보"
+        labels = ("최소 변화형", "균형형", "성과 우선형")
     else:
-        improved_candidates = changed_candidates[
-            changed_candidates["현재보다 개선"]
-        ].copy()
+        improved = changed[changed["현재보다 개선"]].copy()
+        pool = improved if not improved.empty else changed
+        pool_type = "목표 미달 개선 후보" if not improved.empty else "목표 미달 변경 후보"
+        labels = ("최소 변화 개선형", "균형 개선형", "최고 성과형")
 
-        if not improved_candidates.empty:
-            selection_pool = improved_candidates.copy()
-            candidate_pool_type = "목표 미달 개선 후보"
-
-        else:
-            selection_pool = changed_candidates.copy()
-            candidate_pool_type = "목표 미달 변경 후보"
-
-    selection_pool["균형 점수"] = (
-        (
-            selection_pool["예상 환산 점수"]
-            / DISPLAY_SCORE_MAX
-        )
-        * 0.65
-        + (
-            1.0
-            - np.clip(
-                selection_pool["변화 부담 수치"],
-                0.0,
-                1.0
-            )
-        )
-        * 0.35
+    pool["균형 점수"] = (
+        pool["예상 환산 점수"] / DISPLAY_SCORE_MAX * 0.65
+        + (1.0 - np.clip(pool["변화 부담 수치"], 0.0, 1.0)) * 0.35
     )
 
-    if target_reached:
-        minimum_label = "최소 변화형"
-        balanced_label = "균형형"
-        performance_label = "성과 우선형"
-
-    else:
-        minimum_label = "최소 변화 개선형"
-        balanced_label = "균형 개선형"
-        performance_label = "최고 성과형"
-
-    used_plan_keys = set()
-
-    minimum_sorted = selection_pool.sort_values(
-        by=[
-            "변화 부담 수치",
-            "예상 환산 점수"
-        ],
-        ascending=[
-            True,
-            False
-        ]
+    used = set()
+    minimum = choose_unique_row(
+        pool.sort_values(["변화 부담 수치", "예상 환산 점수"], ascending=[True, False]),
+        used,
+    )
+    balanced = choose_unique_row(
+        pool.sort_values(["균형 점수", "예상 환산 점수", "변화 부담 수치"], ascending=[False, False, True]),
+        used,
+    )
+    performance = choose_unique_row(
+        pool.sort_values(["예상 환산 점수", "변화 부담 수치"], ascending=[False, True]),
+        used,
     )
 
-    minimum_row = choose_unique_row(
-        minimum_sorted,
-        used_plan_keys
-    )
-
-    balanced_sorted = selection_pool.sort_values(
-        by=[
-            "균형 점수",
-            "예상 환산 점수",
-            "변화 부담 수치"
-        ],
-        ascending=[
-            False,
-            False,
-            True
-        ]
-    )
-
-    balanced_row = choose_unique_row(
-        balanced_sorted,
-        used_plan_keys
-    )
-
-    performance_sorted = selection_pool.sort_values(
-        by=[
-            "예상 환산 점수",
-            "변화 부담 수치"
-        ],
-        ascending=[
-            False,
-            True
-        ]
-    )
-
-    performance_row = choose_unique_row(
-        performance_sorted,
-        used_plan_keys
-    )
-
-    selected_rows = [
-        (
-            minimum_label,
-            minimum_row,
-            "현재 생활과의 차이가 가장 작은 계획입니다."
-        ),
-        (
-            balanced_label,
-            balanced_row,
-            "예상 성과와 생활 변화 부담을 함께 고려한 계획입니다."
-        ),
-        (
-            performance_label,
-            performance_row,
-            "설정한 조건에서 가장 높은 점수를 예측한 계획입니다."
-        )
+    reasons = [
+        "현재 생활과의 차이가 가장 작은 계획입니다.",
+        "예상 성과와 생활 변화 부담을 함께 고려한 계획입니다.",
+        "설정한 조건에서 가장 높은 학업성과 점수를 예측한 계획입니다.",
     ]
 
-    recommendation_rows = []
-
-    for recommendation_type, row, reason in selected_rows:
+    rows = []
+    for label, row, reason in zip(labels, [minimum, balanced, performance], reasons):
         if row is None:
             continue
-
-        recommendation_rows.append({
-            "추천 유형": recommendation_type,
-            "공부 시간": row["study_hours"],
-            "출석률": row["attendance"],
-            "수면 시간": row["sleep_hours"],
-            "스크린타임": row["screen_time"],
-            "신체활동": row["physical_activity"],
-            "스트레스": row["stress"],
-            "예상 환산 점수": (
-                row["예상 환산 점수"]
-            ),
-            "현재 대비 점수 변화": (
-                row["현재 대비 점수 변화"]
-            ),
-            "원본 예측 점수": (
-                row["원본 예측 점수"]
-            ),
-            "변화 부담": row["변화 부담"],
-            "변화 부담 수치": (
-                row["변화 부담 수치"]
-            ),
-            "실행 난이도": row["실행 난이도"],
-            "실행 난이도 점수": (
-                row["실행 난이도 점수"]
-            ),
-            "주요 생활시간 합계": (
-                row["주요 생활시간 합계"]
-            ),
-            "추천 이유": reason
-        })
+        rows.append(
+            {
+                "추천 유형": label,
+                "공부 시간": row["study_hours"],
+                "출석률": row["attendance"],
+                "수면 시간": row["sleep_hours"],
+                "스크린타임": row["screen_time"],
+                "신체활동": row["physical_activity"],
+                "스트레스": row["stress"],
+                "예상 환산 점수": row["예상 환산 점수"],
+                "현재 대비 점수 변화": row["현재 대비 점수 변화"],
+                "원본 예측 점수": row["원본 예측 점수"],
+                "변화 부담": row["변화 부담"],
+                "변화 부담 수치": row["변화 부담 수치"],
+                "실행 난이도": row["실행 난이도"],
+                "실행 난이도 점수": row["실행 난이도 점수"],
+                "주요 생활시간 합계": row["주요 생활시간 합계"],
+                "추천 이유": reason,
+            }
+        )
 
     return {
         "target_reached": target_reached,
-        "recommendations": pd.DataFrame(
-            recommendation_rows
-        ),
-        "candidate_pool_type": candidate_pool_type
+        "recommendations": pd.DataFrame(rows),
+        "candidate_pool_type": pool_type,
     }
 
 
 # =========================================================
-# 추천 설명 및 계획 함수
+# 추천 설명 및 실행계획
 # =========================================================
-def build_change_summary(
-    current_values,
-    recommendation
-):
+def build_change_summary(current, recommendation):
+    mapping = {
+        "study_hours": ("공부 시간", "공부 시간", "시간"),
+        "attendance": ("출석률", "출석률", "%p"),
+        "sleep_hours": ("수면 시간", "수면 시간", "시간"),
+        "screen_time": ("스크린타임", "스크린타임", "시간"),
+    }
     changes = []
 
-    mapping = {
-        "study_hours": (
-            "공부 시간",
-            "공부 시간",
-            "시간"
-        ),
-        "attendance": (
-            "출석률",
-            "출석률",
-            "%p"
-        ),
-        "sleep_hours": (
-            "수면 시간",
-            "수면 시간",
-            "시간"
-        ),
-        "screen_time": (
-            "스크린타임",
-            "스크린타임",
-            "시간"
-        )
-    }
-
-    for current_key, (
-        recommendation_column,
-        label,
-        unit
-    ) in mapping.items():
-
-        current_value = float(
-            current_values[current_key]
-        )
-
-        recommended_value = float(
-            recommendation[recommendation_column]
-        )
-
-        difference = (
-            recommended_value
-            - current_value
-        )
-
+    for current_key, (column, label, unit) in mapping.items():
+        difference = float(recommendation[column]) - current[current_key]
         if abs(difference) < EPSILON:
             continue
+        direction = "증가" if difference > 0 else "감소"
+        digits = 0 if current_key == "attendance" else 1
+        changes.append(f"{label} {abs(difference):.{digits}f}{unit} {direction}")
 
-        direction = (
-            "증가"
-            if difference > 0
-            else "감소"
-        )
-
-        if current_key == "attendance":
-            changes.append(
-                f"{label} "
-                f"{abs(difference):.0f}{unit} "
-                f"{direction}"
-            )
-
-        else:
-            changes.append(
-                f"{label} "
-                f"{abs(difference):.1f}{unit} "
-                f"{direction}"
-            )
-
-    if not changes:
-        return "현재 생활 유지"
-
-    return ", ".join(changes)
+    return ", ".join(changes) if changes else "현재 생활 유지"
 
 
-def generate_simple_action_plan(
-    current_values,
-    recommendation
-):
-    actions = []
-    weekend_actions = []
-    goals = []
-    checks = []
+def generate_simple_action_plan(current, recommendation):
+    study = float(recommendation["공부 시간"])
+    attendance = float(recommendation["출석률"])
+    sleep = float(recommendation["수면 시간"])
+    screen = float(recommendation["스크린타임"])
 
-    study_target = float(
-        recommendation["공부 시간"]
-    )
+    actions = [
+        f"공부 {study:.1f}시간 {'확보' if study > current['study_hours'] else '유지'}",
+        f"수면 {sleep:.1f}시간 {'확보' if sleep > current['sleep_hours'] else '유지'}",
+        f"스크린타임 {screen:.1f}시간 이내",
+    ]
+    goals = [
+        f"공부 {study:.1f}시간",
+        f"수면 {sleep:.1f}시간",
+    ]
+    checks = ["공부 목표 달성 여부", "취침·기상 시간"]
 
-    attendance_target = float(
-        recommendation["출석률"]
-    )
+    if attendance > current["attendance"]:
+        actions.insert(1, f"출석률 {attendance:.0f}% 목표")
+        goals.append(f"출석률 {attendance:.0f}%")
+        checks.append("지각·결석 여부")
 
-    sleep_target = float(
-        recommendation["수면 시간"]
-    )
-
-    screen_target = float(
-        recommendation["스크린타임"]
-    )
-
-    study_change = (
-        study_target
-        - current_values["study_hours"]
-    )
-
-    attendance_change = (
-        attendance_target
-        - current_values["attendance"]
-    )
-
-    sleep_change = (
-        sleep_target
-        - current_values["sleep_hours"]
-    )
-
-    screen_change = (
-        screen_target
-        - current_values["screen_time"]
-    )
-
-    if study_change > EPSILON:
-        actions.append(
-            f"하루 공부 {study_target:.1f}시간 확보"
-        )
-        goals.append(
-            f"공부 {study_target:.1f}시간"
-        )
-        checks.append(
-            "공부 목표 달성 여부"
-        )
-
-    else:
-        actions.append(
-            f"공부 {study_target:.1f}시간 유지"
-        )
-        goals.append(
-            "현재 공부 루틴 유지"
-        )
-
-    if attendance_change > EPSILON:
-        actions.append(
-            f"출석률 {attendance_target:.0f}% 목표"
-        )
-        goals.append(
-            f"출석률 {attendance_target:.0f}%"
-        )
-        checks.append(
-            "지각·결석 여부"
-        )
-
-    if sleep_change > EPSILON:
-        actions.append(
-            f"수면 {sleep_target:.1f}시간 확보"
-        )
-        goals.append(
-            f"수면 {sleep_target:.1f}시간"
-        )
-        checks.append(
-            "취침·기상 시간"
-        )
-
-    else:
-        actions.append(
-            f"수면 {sleep_target:.1f}시간 유지"
-        )
-
-    if screen_change < -EPSILON:
-        actions.append(
-            f"스크린타임 {screen_target:.1f}시간 이하"
-        )
-        goals.append(
-            f"스크린타임 {screen_target:.1f}시간 이하"
-        )
-        checks.append(
-            "스크린타임 확인"
-        )
-
-    else:
-        actions.append(
-            f"스크린타임 {screen_target:.1f}시간 이내"
-        )
+    if screen < current["screen_time"]:
+        goals.append(f"스크린타임 {screen:.1f}시간 이하")
+        checks.append("스크린타임 확인")
 
     weekend_actions = [
         "한 주 학습 내용 복습",
-        f"수면 {sleep_target:.1f}시간 유지",
-        f"스크린타임 {screen_target:.1f}시간 이하"
+        f"수면 {sleep:.1f}시간 유지",
+        f"스크린타임 {screen:.1f}시간 이하",
     ]
 
-    if not checks:
-        checks.append(
-            "계획 실천 여부"
-        )
-
     weekly_rows = []
-
     for day in DAYS:
-        if day in [
-            "토요일",
-            "일요일"
-        ]:
-            study_text = (
-                f"복습 포함 {study_target:.1f}시간 이내"
-            )
-            attendance_text = "해당 없음"
-
-        else:
-            study_text = f"{study_target:.1f}시간"
-            attendance_text = (
-                f"{attendance_target:.0f}% 수준 유지"
-            )
-
-        weekly_rows.append({
-            "요일": day,
-            "공부 목표": study_text,
-            "출석 목표": attendance_text,
-            "수면 목표": f"{sleep_target:.1f}시간",
-            "스크린타임 목표": (
-                f"{screen_target:.1f}시간 이하"
-            )
-        })
+        weekend = day in ("토요일", "일요일")
+        weekly_rows.append(
+            {
+                "요일": day,
+                "공부 목표": f"복습 포함 {study:.1f}시간 이내" if weekend else f"{study:.1f}시간",
+                "출석 목표": "해당 없음" if weekend else f"{attendance:.0f}% 수준 유지",
+                "수면 목표": f"{sleep:.1f}시간",
+                "스크린타임 목표": f"{screen:.1f}시간 이하",
+            }
+        )
 
     return {
         "weekday_actions": actions,
         "weekend_actions": weekend_actions,
         "core_goals": goals,
         "check_items": checks,
-        "weekly_df": pd.DataFrame(
-            weekly_rows
-        )
+        "weekly_df": pd.DataFrame(weekly_rows),
     }
 
 
-# =========================================================
-# 3주 단계적 실행계획
-# =========================================================
-def interpolate_value(
-    current_value,
-    target_value,
-    ratio
-):
-    return (
-        current_value
-        + (target_value - current_value)
-        * ratio
-    )
-
-
-def generate_three_week_plan(
-    current_values,
-    recommendation
-):
-    target_values = {
-        "study_hours": float(
-            recommendation["공부 시간"]
-        ),
-        "attendance": float(
-            recommendation["출석률"]
-        ),
-        "sleep_hours": float(
-            recommendation["수면 시간"]
-        ),
-        "screen_time": float(
-            recommendation["스크린타임"]
-        )
+def generate_three_week_plan(current, recommendation):
+    targets = {
+        "study_hours": float(recommendation["공부 시간"]),
+        "attendance": float(recommendation["출석률"]),
+        "sleep_hours": float(recommendation["수면 시간"]),
+        "screen_time": float(recommendation["스크린타임"]),
     }
-
-    ratios = [
+    settings = [
         ("1주차", 1 / 3, "생활 변화에 적응"),
         ("2주차", 2 / 3, "목표 수준에 근접"),
-        ("3주차", 1.0, "최종 추천 목표 실천")
+        ("3주차", 1.0, "최종 추천 목표 실천"),
     ]
 
     rows = []
-
-    for week_name, ratio, key_goal in ratios:
-        study_value = interpolate_value(
-            current_values["study_hours"],
-            target_values["study_hours"],
-            ratio
+    for week, ratio, goal in settings:
+        rows.append(
+            {
+                "주차": week,
+                "공부 시간": round(current["study_hours"] + (targets["study_hours"] - current["study_hours"]) * ratio, 1),
+                "출석률": round(current["attendance"] + (targets["attendance"] - current["attendance"]) * ratio, 1),
+                "수면 시간": round(current["sleep_hours"] + (targets["sleep_hours"] - current["sleep_hours"]) * ratio, 1),
+                "스크린타임": round(current["screen_time"] + (targets["screen_time"] - current["screen_time"]) * ratio, 1),
+                "핵심 목표": goal,
+            }
         )
-
-        attendance_value = interpolate_value(
-            current_values["attendance"],
-            target_values["attendance"],
-            ratio
-        )
-
-        sleep_value = interpolate_value(
-            current_values["sleep_hours"],
-            target_values["sleep_hours"],
-            ratio
-        )
-
-        screen_value = interpolate_value(
-            current_values["screen_time"],
-            target_values["screen_time"],
-            ratio
-        )
-
-        rows.append({
-            "주차": week_name,
-            "공부 시간": round(study_value, 1),
-            "출석률": round(attendance_value, 1),
-            "수면 시간": round(sleep_value, 1),
-            "스크린타임": round(screen_value, 1),
-            "핵심 목표": key_goal
-        })
-
     return pd.DataFrame(rows)
 
 
-# =========================================================
-# 추천 비교
-# =========================================================
-def make_recommendation_comparison(
-    current_values,
-    recommendations
-):
+def make_recommendation_comparison(current, recommendations):
     rows = []
-
-    for _, recommendation in recommendations.iterrows():
-        rows.append({
-            "추천 유형": recommendation["추천 유형"],
-            "공부 시간 변화": (
-                recommendation["공부 시간"]
-                - current_values["study_hours"]
-            ),
-            "출석률 변화": (
-                recommendation["출석률"]
-                - current_values["attendance"]
-            ),
-            "수면 시간 변화": (
-                recommendation["수면 시간"]
-                - current_values["sleep_hours"]
-            ),
-            "스크린타임 변화": (
-                recommendation["스크린타임"]
-                - current_values["screen_time"]
-            ),
-            "예상 환산 점수": (
-                recommendation["예상 환산 점수"]
-            ),
-            "현재 대비 점수 변화": (
-                recommendation["현재 대비 점수 변화"]
-            ),
-            "변화 부담": recommendation["변화 부담"],
-            "실행 난이도": recommendation["실행 난이도"]
-        })
-
+    for _, row in recommendations.iterrows():
+        rows.append(
+            {
+                "추천 유형": row["추천 유형"],
+                "공부 시간 변화": row["공부 시간"] - current["study_hours"],
+                "출석률 변화": row["출석률"] - current["attendance"],
+                "수면 시간 변화": row["수면 시간"] - current["sleep_hours"],
+                "스크린타임 변화": row["스크린타임"] - current["screen_time"],
+                "예상 환산 점수": row["예상 환산 점수"],
+                "현재 대비 점수 변화": row["현재 대비 점수 변화"],
+                "변화 부담": row["변화 부담"],
+                "실행 난이도": row["실행 난이도"],
+            }
+        )
     return pd.DataFrame(rows)
 
 
-# =========================================================
-# 카드 HTML
-# =========================================================
-def build_recommendation_card_html(
-    row,
-    current_values,
-    selected_type
-):
-    is_selected = (
-        row["추천 유형"]
-        == selected_type
-    )
-
-    card_class = (
-        "recommendation-card-selected"
-        if is_selected
-        else "recommendation-card"
-    )
-
-    selected_badge = (
-        '<div class="selected-badge">선택된 추천안</div>'
-        if is_selected
-        else ""
-    )
-
-    recommendation_type = escape(
-        str(row["추천 유형"])
-    )
-
-    recommendation_reason = escape(
-        str(row["추천 이유"])
-    )
-
-    change_summary = escape(
-        build_change_summary(
-            current_values,
-            row
-        )
-    )
-
+def build_recommendation_card_html(row, current, selected_type):
+    selected = row["추천 유형"] == selected_type
+    card_class = "recommendation-card-selected" if selected else "recommendation-card"
+    badge = '<div class="selected-badge">선택된 추천안</div>' if selected else ""
     return (
-        f'<div class="{card_class}">'
-        f'{selected_badge}'
-        f'<div class="card-title">{recommendation_type}</div>'
-        f'<div class="card-score-label">예상 학업성과 점수</div>'
-        f'<div class="card-score">'
-        f'{row["예상 환산 점수"]:.2f} / {DISPLAY_SCORE_MAX:.2f}'
-        f'</div>'
-        f'<div class="card-delta-positive">'
-        f'↑ {row["현재 대비 점수 변화"]:+.2f}'
-        f'</div>'
+        f'<div class="{card_class}">{badge}'
+        f'<div class="card-title">{escape(str(row["추천 유형"]))}</div>'
+        '<div class="card-score-label">예상 학업성과 점수</div>'
+        f'<div class="card-score">{row["예상 환산 점수"]:.2f} / {DISPLAY_SCORE_MAX:.2f}</div>'
+        f'<div class="card-delta-positive">↑ {row["현재 대비 점수 변화"]:+.2f}</div>'
         f'<p><b>공부 시간:</b> {row["공부 시간"]:.1f}시간</p>'
         f'<p><b>출석률:</b> {row["출석률"]:.0f}%</p>'
         f'<p><b>수면 시간:</b> {row["수면 시간"]:.1f}시간</p>'
         f'<p><b>스크린타임:</b> {row["스크린타임"]:.1f}시간</p>'
-        f'<p><b>실행 난이도:</b> '
-        f'{escape(str(row["실행 난이도"]))} '
-        f'({int(row["실행 난이도 점수"])}/5)</p>'
-        f'<div class="card-reason">{recommendation_reason}</div>'
-        f'<small>{change_summary}</small>'
-        f'</div>'
+        f'<p><b>실행 난이도:</b> {escape(str(row["실행 난이도"]))} ({int(row["실행 난이도 점수"])}/5)</p>'
+        f'<div class="card-reason">{escape(str(row["추천 이유"]))}</div>'
+        f'<small>{escape(build_change_summary(current, row))}</small></div>'
     )
 
 
 # =========================================================
-# 엑셀 공통 함수
+# 엑셀 스타일 및 유틸리티
 # =========================================================
-def set_excel_title(
-    worksheet,
-    title,
-    subtitle,
-    last_column
-):
-    last_column_letter = get_column_letter(
-        last_column
-    )
-
-    worksheet.merge_cells(
-        f"A1:{last_column_letter}1"
-    )
-
-    worksheet["A1"] = title
-    worksheet["A1"].fill = EXCEL_TITLE_FILL
-    worksheet["A1"].font = EXCEL_TITLE_FONT
-    worksheet["A1"].alignment = Alignment(
-        horizontal="left",
-        vertical="center"
-    )
-
-    worksheet.row_dimensions[1].height = 32
-
-    worksheet.merge_cells(
-        f"A2:{last_column_letter}2"
-    )
-
-    worksheet["A2"] = subtitle
-    worksheet["A2"].fill = EXCEL_SUBTITLE_FILL
-    worksheet["A2"].font = EXCEL_SUBTITLE_FONT
-    worksheet["A2"].alignment = Alignment(
-        horizontal="left",
-        vertical="center",
-        wrap_text=True
-    )
-
-    worksheet.row_dimensions[2].height = 35
-
-    worksheet.merge_cells(
-        f"A3:{last_column_letter}3"
-    )
-
-    worksheet["A3"] = (
-        "생성일: "
-        + datetime.now().strftime(
-            "%Y-%m-%d %H:%M"
-        )
-    )
-
-    worksheet["A3"].font = Font(
-        italic=True,
-        color="666666",
-        size=9
-    )
-
-    worksheet["A3"].alignment = Alignment(
-        horizontal="right"
-    )
+TITLE_FILL = PatternFill("solid", fgColor="1F4E78")
+SUBTITLE_FILL = PatternFill("solid", fgColor="D9EAF7")
+HEADER_FILL = PatternFill("solid", fgColor="5B9BD5")
+LIGHT_BLUE_FILL = PatternFill("solid", fgColor="EAF3F8")
+GREEN_FILL = PatternFill("solid", fgColor="E2F0D9")
+YELLOW_FILL = PatternFill("solid", fgColor="FFF2CC")
+RED_FILL = PatternFill("solid", fgColor="FCE4D6")
+GRAY_FILL = PatternFill("solid", fgColor="F2F2F2")
+THIN = Side(style="thin", color="D9E1F2")
+CELL_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 
-def set_excel_sheet_options(
-    worksheet,
-    landscape=True,
-    freeze_panes="A5"
-):
-    worksheet.freeze_panes = freeze_panes
-    worksheet.sheet_view.showGridLines = False
+def set_excel_title(ws, title, subtitle, last_column):
+    end = get_column_letter(last_column)
+    ws.merge_cells(f"A1:{end}1")
+    ws["A1"] = title
+    ws["A1"].fill = TITLE_FILL
+    ws["A1"].font = Font(color="FFFFFF", bold=True, size=18)
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[1].height = 32
 
-    worksheet.page_setup.orientation = (
-        "landscape"
-        if landscape
-        else "portrait"
-    )
+    ws.merge_cells(f"A2:{end}2")
+    ws["A2"] = subtitle
+    ws["A2"].fill = SUBTITLE_FILL
+    ws["A2"].font = Font(bold=True, size=11)
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.row_dimensions[2].height = 35
 
-    worksheet.page_setup.fitToWidth = 1
-    worksheet.page_setup.fitToHeight = 0
-
-    worksheet.sheet_properties.pageSetUpPr.fitToPage = True
-
-    worksheet.page_margins.left = 0.3
-    worksheet.page_margins.right = 0.3
-    worksheet.page_margins.top = 0.5
-    worksheet.page_margins.bottom = 0.5
+    ws.merge_cells(f"A3:{end}3")
+    ws["A3"] = f"생성일: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    ws["A3"].font = Font(italic=True, color="666666", size=9)
+    ws["A3"].alignment = Alignment(horizontal="right")
 
 
-def write_excel_table(
-    worksheet,
-    start_row,
-    headers,
-    rows,
-    widths=None,
-    number_formats=None
-):
-    for column_index, header in enumerate(
-        headers,
-        start=1
-    ):
-        cell = worksheet.cell(
-            row=start_row,
-            column=column_index,
-            value=header
-        )
+def set_excel_sheet_options(ws, landscape=True, freeze_panes="A5"):
+    ws.freeze_panes = freeze_panes
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "landscape" if landscape else "portrait"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_margins.left = 0.3
+    ws.page_margins.right = 0.3
+    ws.page_margins.top = 0.5
+    ws.page_margins.bottom = 0.5
 
-        cell.fill = EXCEL_HEADER_FILL
-        cell.font = EXCEL_HEADER_FONT
-        cell.alignment = Alignment(
-            horizontal="center",
-            vertical="center",
-            wrap_text=True
-        )
-        cell.border = EXCEL_BORDER
 
-    worksheet.row_dimensions[
-        start_row
-    ].height = 28
+def write_excel_table(ws, start_row, headers, rows, widths=None, number_formats=None):
+    for column, header in enumerate(headers, 1):
+        cell = ws.cell(start_row, column, header)
+        cell.fill = HEADER_FILL
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = CELL_BORDER
 
-    for row_index, row_values in enumerate(
-        rows,
-        start=start_row + 1
-    ):
-        for column_index, value in enumerate(
-            row_values,
-            start=1
-        ):
-            cell = worksheet.cell(
-                row=row_index,
-                column=column_index,
-                value=value
-            )
+    ws.row_dimensions[start_row].height = 28
 
-            cell.font = EXCEL_NORMAL_FONT
-            cell.alignment = Alignment(
-                horizontal="center",
-                vertical="center",
-                wrap_text=True
-            )
-            cell.border = EXCEL_BORDER
-
+    for row_index, values in enumerate(rows, start_row + 1):
+        for column, value in enumerate(values, 1):
+            cell = ws.cell(row_index, column, value)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = CELL_BORDER
             if row_index % 2 == 0:
-                cell.fill = EXCEL_LIGHT_BLUE_FILL
-
-            if (
-                number_formats
-                and column_index in number_formats
-            ):
-                cell.number_format = (
-                    number_formats[column_index]
-                )
-
-        worksheet.row_dimensions[
-            row_index
-        ].height = 25
+                cell.fill = LIGHT_BLUE_FILL
+            if number_formats and column in number_formats and not isinstance(value, str):
+                cell.number_format = number_formats[column]
+        ws.row_dimensions[row_index].height = 25
 
     if widths:
-        for column_index, width in widths.items():
-            worksheet.column_dimensions[
-                get_column_letter(column_index)
-            ].width = width
+        for column, width in widths.items():
+            ws.column_dimensions[get_column_letter(column)].width = width
 
-    end_row = (
-        start_row + len(rows)
-    )
-
-    end_column_letter = get_column_letter(
-        len(headers)
-    )
-
-    worksheet.auto_filter.ref = (
-        f"A{start_row}:"
-        f"{end_column_letter}{end_row}"
-    )
+    if rows:
+        ws.auto_filter.ref = f"A{start_row}:{get_column_letter(len(headers))}{start_row + len(rows)}"
 
 
-def write_excel_key_value_section(
-    worksheet,
-    start_row,
-    title,
-    values,
-    value_column_width=32
-):
-    worksheet.merge_cells(
-        start_row=start_row,
-        start_column=1,
-        end_row=start_row,
-        end_column=2
-    )
+def write_key_value_section(ws, start_row, title, values, value_width=38):
+    ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=2)
+    title_cell = ws.cell(start_row, 1, title)
+    title_cell.fill = SUBTITLE_FILL
+    title_cell.font = Font(bold=True, size=13, color="1F4E78")
+    title_cell.alignment = Alignment(vertical="center")
+    ws.row_dimensions[start_row].height = 25
 
-    title_cell = worksheet.cell(
-        row=start_row,
-        column=1,
-        value=title
-    )
-
-    title_cell.font = EXCEL_SECTION_FONT
-    title_cell.fill = EXCEL_SUBTITLE_FILL
-    title_cell.alignment = Alignment(
-        vertical="center"
-    )
-
-    worksheet.row_dimensions[
-        start_row
-    ].height = 25
-
-    current_row = start_row + 1
-
+    row = start_row + 1
     for label, value in values:
-        label_cell = worksheet.cell(
-            row=current_row,
-            column=1,
-            value=label
-        )
+        label_cell = ws.cell(row, 1, label)
+        value_cell = ws.cell(row, 2, value)
+        label_cell.fill = GRAY_FILL
+        label_cell.font = Font(bold=True)
+        for cell in (label_cell, value_cell):
+            cell.border = CELL_BORDER
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+        ws.row_dimensions[row].height = 24
+        row += 1
 
-        value_cell = worksheet.cell(
-            row=current_row,
-            column=2,
-            value=value
-        )
-
-        label_cell.fill = EXCEL_GRAY_FILL
-        label_cell.font = Font(
-            bold=True
-        )
-
-        for cell in [
-            label_cell,
-            value_cell
-        ]:
-            cell.border = EXCEL_BORDER
-            cell.alignment = Alignment(
-                vertical="center",
-                wrap_text=True
-            )
-
-        worksheet.row_dimensions[
-            current_row
-        ].height = 24
-
-        current_row += 1
-
-    worksheet.column_dimensions[
-        "A"
-    ].width = 24
-
-    worksheet.column_dimensions[
-        "B"
-    ].width = value_column_width
-
-    return current_row
+    ws.column_dimensions["A"].width = 24
+    ws.column_dimensions["B"].width = value_width
+    return row
 
 
-def get_excel_difficulty_fill(
-    difficulty_score
-):
-    if difficulty_score <= 2:
-        return EXCEL_GREEN_FILL
+def difficulty_fill(score):
+    if score <= 2:
+        return GREEN_FILL
+    if score == 3:
+        return YELLOW_FILL
+    return RED_FILL
 
-    if difficulty_score == 3:
-        return EXCEL_YELLOW_FILL
 
-    return EXCEL_RED_FILL
+def format_excel_change(value):
+    return "유지" if abs(float(value)) < EPSILON else float(value)
 
 
 # =========================================================
 # 전체 추천안 엑셀
 # =========================================================
-def recommendations_to_xlsx(
-    recommendations,
-    comparison_df,
-    current_values,
-    target_score
-):
-    workbook = Workbook()
-
-    summary_sheet = workbook.active
-    summary_sheet.title = "추천안 비교"
+def recommendations_to_xlsx(recommendations, comparison_df, current, target_score):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "추천안 비교"
 
     set_excel_title(
-        worksheet=summary_sheet,
-        title="Campus Twin 전체 추천안 비교",
-        subtitle=(
-            "목표 점수와 생활 제약조건 안에서 생성된 "
-            "추천안을 핵심 항목 중심으로 비교합니다."
-        ),
-        last_column=10
+        ws,
+        "Campus Twin 전체 추천안 비교",
+        "목표 점수와 생활 제약조건 안에서 생성된 추천안을 핵심 항목 중심으로 비교합니다.",
+        10,
     )
 
-    summary_headers = [
+    headers = [
         "추천 유형",
         "공부 시간",
         "출석률",
         "수면 시간",
         "스크린타임",
-        "예상 점수",
+        "예상 학업성과 점수",
         "점수 변화",
         "변화 부담",
         "실행 난이도",
-        "추천 이유"
+        "추천 이유",
     ]
-
-    summary_rows = []
-
-    for _, row in recommendations.iterrows():
-        summary_rows.append([
+    rows = [
+        [
             row["추천 유형"],
             float(row["공부 시간"]),
             float(row["출석률"]),
@@ -1842,862 +819,306 @@ def recommendations_to_xlsx(
             float(row["예상 환산 점수"]),
             float(row["현재 대비 점수 변화"]),
             row["변화 부담"],
-            (
-                f"{row['실행 난이도']} "
-                f"({int(row['실행 난이도 점수'])}/5)"
-            ),
-            row["추천 이유"]
-        ])
-
-    write_excel_table(
-        worksheet=summary_sheet,
-        start_row=5,
-        headers=summary_headers,
-        rows=summary_rows,
-        widths={
-            1: 20,
-            2: 12,
-            3: 12,
-            4: 12,
-            5: 14,
-            6: 13,
-            7: 13,
-            8: 12,
-            9: 18,
-            10: 42
-        },
-        number_formats={
-            2: "0.0",
-            3: "0.0",
-            4: "0.0",
-            5: "0.0",
-            6: "0.00",
-            7: "+0.00;-0.00;0.00"
-        }
-    )
-
-    for row_index, (_, row) in enumerate(
-        recommendations.iterrows(),
-        start=6
-    ):
-        difficulty_score = int(
-            row["실행 난이도 점수"]
-        )
-
-        summary_sheet.cell(
-            row=row_index,
-            column=9
-        ).fill = get_excel_difficulty_fill(
-            difficulty_score
-        )
-
-    set_excel_sheet_options(
-        worksheet=summary_sheet,
-        landscape=True,
-        freeze_panes="A6"
-    )
-
-    # -----------------------------------------------------
-    # 변화 비교 시트
-    # -----------------------------------------------------
-    change_sheet = workbook.create_sheet(
-        "변화 비교"
-    )
-
-    set_excel_title(
-        worksheet=change_sheet,
-        title="현재 생활 대비 변화 비교",
-        subtitle=(
-            "각 추천안이 현재 생활습관에서 "
-            "얼마나 달라지는지 보여줍니다."
-        ),
-        last_column=9
-    )
-
-    change_headers = list(
-        comparison_df.columns
-    )
-
-    change_rows = (
-        comparison_df
-        .astype(object)
-        .values
-        .tolist()
-    )
-
-    write_excel_table(
-        worksheet=change_sheet,
-        start_row=5,
-        headers=change_headers,
-        rows=change_rows,
-        widths={
-            1: 21,
-            2: 17,
-            3: 17,
-            4: 17,
-            5: 19,
-            6: 15,
-            7: 18,
-            8: 13,
-            9: 15
-        },
-        number_formats={
-            2: "+0.00;-0.00;0.00",
-            3: "+0.00;-0.00;0.00",
-            4: "+0.00;-0.00;0.00",
-            5: "+0.00;-0.00;0.00",
-            6: "0.00",
-            7: "+0.00;-0.00;0.00"
-        }
-    )
-
-    set_excel_sheet_options(
-        worksheet=change_sheet,
-        landscape=True,
-        freeze_panes="A6"
-    )
-
-    # -----------------------------------------------------
-    # 입력 조건 시트
-    # -----------------------------------------------------
-    condition_sheet = workbook.create_sheet(
-        "입력 조건"
-    )
-
-    set_excel_title(
-        worksheet=condition_sheet,
-        title="Campus Twin 입력 조건",
-        subtitle=(
-            "추천 계획을 생성할 때 사용한 "
-            "현재 생활습관과 목표 점수입니다."
-        ),
-        last_column=2
-    )
-
-    current_prediction = predict_from_values(
-        current_values
-    )
-
-    condition_values = [
-        (
-            "현재 공부 시간",
-            f"{current_values['study_hours']:.1f}시간"
-        ),
-        (
-            "현재 출석률",
-            f"{current_values['attendance']:.1f}%"
-        ),
-        (
-            "현재 수면 시간",
-            f"{current_values['sleep_hours']:.1f}시간"
-        ),
-        (
-            "현재 스크린타임",
-            f"{current_values['screen_time']:.1f}시간"
-        ),
-        (
-            "현재 신체활동",
-            f"{current_values['physical_activity']:.1f}시간"
-        ),
-        (
-            "현재 스트레스",
-            f"{current_values['stress']:.1f}단계"
-        ),
-        (
-            "현재 학업성과 점수",
-            f"{current_prediction['display_score']:.2f} / 4.50"
-        ),
-        (
-            "목표 학업성과 점수",
-            f"{target_score:.2f} / 4.50"
-        )
+            f"{row['실행 난이도']} ({int(row['실행 난이도 점수'])}/5)",
+            row["추천 이유"],
+        ]
+        for _, row in recommendations.iterrows()
     ]
 
-    write_excel_key_value_section(
-        worksheet=condition_sheet,
-        start_row=5,
-        title="현재 상태 및 목표",
-        values=condition_values,
-        value_column_width=30
-    )
-
-    set_excel_sheet_options(
-        worksheet=condition_sheet,
-        landscape=False,
-        freeze_panes="A6"
-    )
-
-    # -----------------------------------------------------
-    # 세부 데이터 시트
-    # -----------------------------------------------------
-    detail_sheet = workbook.create_sheet(
-        "세부 데이터"
-    )
-
-    set_excel_title(
-        worksheet=detail_sheet,
-        title="추천안 세부 계산 데이터",
-        subtitle=(
-            "모델 원본 예측값과 변화 부담 수치 등 "
-            "분석용 데이터를 포함합니다."
-        ),
-        last_column=len(
-            recommendations.columns
-        )
-    )
-
-    detail_headers = list(
-        recommendations.columns
-    )
-
-    detail_rows = (
-        recommendations
-        .astype(object)
-        .values
-        .tolist()
-    )
-
-    detail_widths = {
-        index: 16
-        for index in range(
-            1,
-            len(detail_headers) + 1
-        )
-    }
-
-    if "추천 이유" in detail_headers:
-        detail_widths[
-            detail_headers.index(
-                "추천 이유"
-            ) + 1
-        ] = 45
-
     write_excel_table(
-        worksheet=detail_sheet,
-        start_row=5,
-        headers=detail_headers,
-        rows=detail_rows,
-        widths=detail_widths
+        ws,
+        5,
+        headers,
+        rows,
+        widths={1: 20, 2: 12, 3: 12, 4: 12, 5: 14, 6: 20, 7: 13, 8: 12, 9: 18, 10: 42},
+        number_formats={2: "0.0", 3: "0.0", 4: "0.0", 5: "0.0", 6: "0.00", 7: "+0.00;-0.00;0.00"},
     )
 
-    set_excel_sheet_options(
-        worksheet=detail_sheet,
-        landscape=True,
-        freeze_panes="A6"
+    for row_index, (_, row) in enumerate(recommendations.iterrows(), start=6):
+        ws.cell(row_index, 9).fill = difficulty_fill(int(row["실행 난이도 점수"]))
+
+    set_excel_sheet_options(ws, True, "A6")
+
+    change_ws = wb.create_sheet("변화 비교")
+    set_excel_title(
+        change_ws,
+        "현재 생활 대비 변화 비교",
+        "각 추천안이 현재 생활습관에서 얼마나 달라지는지 보여줍니다.",
+        len(comparison_df.columns),
     )
+    write_excel_table(
+        change_ws,
+        5,
+        list(comparison_df.columns),
+        comparison_df.astype(object).values.tolist(),
+        widths={1: 21, 2: 17, 3: 17, 4: 17, 5: 19, 6: 15, 7: 18, 8: 13, 9: 15},
+        number_formats={2: "+0.00;-0.00;0.00", 3: "+0.00;-0.00;0.00", 4: "+0.00;-0.00;0.00", 5: "+0.00;-0.00;0.00", 6: "0.00", 7: "+0.00;-0.00;0.00"},
+    )
+    set_excel_sheet_options(change_ws, True, "A6")
+
+    condition_ws = wb.create_sheet("입력 조건")
+    set_excel_title(
+        condition_ws,
+        "Campus Twin 입력 조건",
+        "추천 계획을 생성할 때 사용한 현재 생활습관과 목표 점수입니다.",
+        2,
+    )
+    current_prediction = predict_from_values(current)
+    write_key_value_section(
+        condition_ws,
+        5,
+        "현재 상태 및 목표",
+        [
+            ("현재 공부 시간", f"{current['study_hours']:.1f}시간"),
+            ("현재 출석률", f"{current['attendance']:.1f}%"),
+            ("현재 수면 시간", f"{current['sleep_hours']:.1f}시간"),
+            ("현재 스크린타임", f"{current['screen_time']:.1f}시간"),
+            ("현재 신체활동", f"{current['physical_activity']:.1f}시간"),
+            ("현재 스트레스", f"{current['stress']:.1f}단계"),
+            ("현재 학업성과 점수", f"{current_prediction['display_score']:.2f} / 4.50"),
+            ("목표 학업성과 점수", f"{target_score:.2f} / 4.50"),
+        ],
+        30,
+    )
+    set_excel_sheet_options(condition_ws, False, "A6")
+
+    detail_ws = wb.create_sheet("세부 데이터")
+    set_excel_title(
+        detail_ws,
+        "추천안 세부 계산 데이터",
+        "모델 원본 예측값과 변화 부담 수치 등 분석용 데이터를 포함합니다.",
+        len(recommendations.columns),
+    )
+    widths = {i: 16 for i in range(1, len(recommendations.columns) + 1)}
+    if "추천 이유" in recommendations.columns:
+        widths[list(recommendations.columns).index("추천 이유") + 1] = 45
+    write_excel_table(
+        detail_ws,
+        5,
+        list(recommendations.columns),
+        recommendations.astype(object).values.tolist(),
+        widths=widths,
+    )
+    set_excel_sheet_options(detail_ws, True, "A6")
 
     output = BytesIO()
-    workbook.save(output)
-    output.seek(0)
-
+    wb.save(output)
     return output.getvalue()
 
 
 # =========================================================
 # 선택한 계획 엑셀
 # =========================================================
-def selected_plan_to_xlsx(
-    selected_plan,
-    weekly_plan,
-    three_week_plan,
-    current_values,
-    completed_days
-):
-    workbook = Workbook()
-
-    # -----------------------------------------------------
-    # 계획 요약
-    # -----------------------------------------------------
-    summary_sheet = workbook.active
-    summary_sheet.title = "계획 요약"
+def selected_plan_to_xlsx(selected_plan, weekly_plan, three_week_plan, current, completed_days):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "계획 요약"
 
     set_excel_title(
-        worksheet=summary_sheet,
-        title="Campus Twin 선택 계획 요약",
-        subtitle=(
-            "선택한 추천안의 핵심 정보와 "
-            "현재 생활 대비 변화를 정리한 문서입니다."
-        ),
-        last_column=4
+        ws,
+        "Campus Twin 선택 계획 요약",
+        "선택한 추천안의 핵심 정보와 현재 생활 대비 변화를 정리한 문서입니다.",
+        4,
     )
 
-    difficulty_score = int(
-        selected_plan[
-            "실행 난이도 점수"
-        ]
+    difficulty_score = int(selected_plan["실행 난이도 점수"])
+    progress = int(round(len(completed_days) / len(DAYS) * 100))
+
+    next_row = write_key_value_section(
+        ws,
+        5,
+        "선택한 추천안",
+        [
+            ("추천 유형", selected_plan["추천 유형"]),
+            ("예상 학업성과 점수", f"{selected_plan['예상 환산 점수']:.2f} / 4.50"),
+            ("현재 대비 점수 변화", f"{selected_plan['현재 대비 점수 변화']:+.2f}"),
+            ("실행 난이도", f"{selected_plan['실행 난이도']} ({difficulty_score}/5)"),
+            ("핵심 생활 변화", build_change_summary(current, selected_plan)),
+            ("추천 이유", selected_plan["추천 이유"]),
+            ("이번 주 진행률", f"{len(completed_days)}일 / 7일 ({progress}%)"),
+        ],
+        52,
     )
 
-    progress_percent = int(
-        round(
-            len(completed_days)
-            / len(DAYS)
-            * 100
-        )
-    )
-
-    summary_values = [
-        (
-            "추천 유형",
-            selected_plan["추천 유형"]
-        ),
-        (
-            "예상 학업성과 점수",
-            (
-                f"{selected_plan['예상 환산 점수']:.2f}"
-                " / 4.50"
-            )
-        ),
-        (
-            "현재 대비 점수 변화",
-            (
-                f"{selected_plan['현재 대비 점수 변화']:+.2f}"
-            )
-        ),
-        (
-            "실행 난이도",
-            (
-                f"{selected_plan['실행 난이도']} "
-                f"({difficulty_score}/5)"
-            )
-        ),
-        (
-            "핵심 생활 변화",
-            build_change_summary(
-                current_values,
-                selected_plan
-            )
-        ),
-        (
-            "추천 이유",
-            selected_plan["추천 이유"]
-        ),
-        (
-            "이번 주 진행률",
-            (
-                f"{len(completed_days)}일 / 7일 "
-                f"({progress_percent}%)"
-            )
-        )
-    ]
-
-    next_row = write_excel_key_value_section(
-        worksheet=summary_sheet,
-        start_row=5,
-        title="선택한 추천안",
-        values=summary_values,
-        value_column_width=52
-    )
-
-    summary_sheet[
-        f"B{next_row - 4}"
-    ].fill = get_excel_difficulty_fill(
-        difficulty_score
-    )
-
-    current_target_headers = [
-        "생활요인",
-        "현재",
-        "추천 목표",
-        "변화"
-    ]
+    ws[f"B{next_row - 4}"].fill = difficulty_fill(difficulty_score)
 
     current_target_rows = [
         [
             "공부 시간",
-            current_values["study_hours"],
-            float(
-                selected_plan["공부 시간"]
-            ),
-            (
-                float(
-                    selected_plan["공부 시간"]
-                )
-                - current_values["study_hours"]
-            )
+            current["study_hours"],
+            float(selected_plan["공부 시간"]),
+            format_excel_change(float(selected_plan["공부 시간"]) - current["study_hours"]),
         ],
         [
             "출석률",
-            current_values["attendance"],
-            float(
-                selected_plan["출석률"]
-            ),
-            (
-                float(
-                    selected_plan["출석률"]
-                )
-                - current_values["attendance"]
-            )
+            current["attendance"],
+            float(selected_plan["출석률"]),
+            format_excel_change(float(selected_plan["출석률"]) - current["attendance"]),
         ],
         [
             "수면 시간",
-            current_values["sleep_hours"],
-            float(
-                selected_plan["수면 시간"]
-            ),
-            (
-                float(
-                    selected_plan["수면 시간"]
-                )
-                - current_values["sleep_hours"]
-            )
+            current["sleep_hours"],
+            float(selected_plan["수면 시간"]),
+            format_excel_change(float(selected_plan["수면 시간"]) - current["sleep_hours"]),
         ],
         [
             "스크린타임",
-            current_values["screen_time"],
-            float(
-                selected_plan["스크린타임"]
-            ),
-            (
-                float(
-                    selected_plan["스크린타임"]
-                )
-                - current_values["screen_time"]
-            )
-        ]
+            current["screen_time"],
+            float(selected_plan["스크린타임"]),
+            format_excel_change(float(selected_plan["스크린타임"]) - current["screen_time"]),
+        ],
     ]
 
+    table_start = next_row + 2
     write_excel_table(
-        worksheet=summary_sheet,
-        start_row=next_row + 2,
-        headers=current_target_headers,
-        rows=current_target_rows,
-        widths={
-            1: 18,
-            2: 14,
-            3: 14,
-            4: 14
-        },
-        number_formats={
-            2: "0.0",
-            3: "0.0",
-            4: "+0.0;-0.0;0.0"
-        }
+        ws,
+        table_start,
+        ["생활요인", "현재", "추천 목표", "변화"],
+        current_target_rows,
+        widths={1: 18, 2: 14, 3: 14, 4: 14},
+        number_formats={2: "0.0", 3: "0.0", 4: "+0.0;-0.0;0.0"},
     )
 
-    set_excel_sheet_options(
-        worksheet=summary_sheet,
-        landscape=False,
-        freeze_panes="A5"
-    )
+    for offset, row_values in enumerate(current_target_rows, 1):
+        excel_row = table_start + offset
+        if row_values[3] == "유지":
+            for column in range(1, 5):
+                cell = ws.cell(excel_row, column)
+                cell.fill = GRAY_FILL
+                cell.font = Font(color="666666")
+            ws.cell(excel_row, 4).font = Font(bold=True, color="666666")
 
-    # -----------------------------------------------------
-    # 3주 실행계획
-    # -----------------------------------------------------
-    three_week_sheet = workbook.create_sheet(
-        "3주 실행계획"
-    )
+    set_excel_sheet_options(ws, False, "A5")
 
+    three_ws = wb.create_sheet("3주 실행계획")
     set_excel_title(
-        worksheet=three_week_sheet,
-        title="3주 단계적 실행계획",
-        subtitle=(
-            "생활 변화 부담을 줄이기 위해 "
-            "목표 수준에 단계적으로 접근합니다."
-        ),
-        last_column=6
-    )
-
-    three_week_headers = [
-        "주차",
-        "공부 시간",
-        "출석률",
-        "수면 시간",
-        "스크린타임",
-        "핵심 목표"
-    ]
-
-    three_week_rows = (
-        three_week_plan[
-            [
-                "주차",
-                "공부 시간",
-                "출석률",
-                "수면 시간",
-                "스크린타임",
-                "핵심 목표"
-            ]
-        ]
-        .astype(object)
-        .values
-        .tolist()
-    )
-
-    write_excel_table(
-        worksheet=three_week_sheet,
-        start_row=5,
-        headers=three_week_headers,
-        rows=three_week_rows,
-        widths={
-            1: 13,
-            2: 14,
-            3: 14,
-            4: 14,
-            5: 16,
-            6: 30
-        },
-        number_formats={
-            2: "0.0",
-            3: "0.0",
-            4: "0.0",
-            5: "0.0"
-        }
-    )
-
-    for row_index in range(
+        three_ws,
+        "3주 단계적 실행계획",
+        "생활 변화 부담을 줄이기 위해 목표 수준에 단계적으로 접근합니다.",
         6,
-        6 + len(three_week_rows)
-    ):
-        if row_index == 6:
-            fill = EXCEL_GREEN_FILL
-        elif row_index == 7:
-            fill = EXCEL_YELLOW_FILL
-        else:
-            fill = EXCEL_RED_FILL
-
-        for column_index in range(
-            1,
-            7
-        ):
-            three_week_sheet.cell(
-                row=row_index,
-                column=column_index
-            ).fill = fill
-
-    set_excel_sheet_options(
-        worksheet=three_week_sheet,
-        landscape=True,
-        freeze_panes="A6"
     )
-
-    # -----------------------------------------------------
-    # 주간 실천표
-    # -----------------------------------------------------
-    weekly_sheet = workbook.create_sheet(
-        "주간 실천표"
+    three_rows = three_week_plan[
+        ["주차", "공부 시간", "출석률", "수면 시간", "스크린타임", "핵심 목표"]
+    ].astype(object).values.tolist()
+    write_excel_table(
+        three_ws,
+        5,
+        ["주차", "공부 시간", "출석률", "수면 시간", "스크린타임", "핵심 목표"],
+        three_rows,
+        widths={1: 13, 2: 14, 3: 14, 4: 14, 5: 16, 6: 30},
+        number_formats={2: "0.0", 3: "0.0", 4: "0.0", 5: "0.0"},
     )
+    for row_index, fill in zip(range(6, 9), [GREEN_FILL, YELLOW_FILL, RED_FILL]):
+        for column in range(1, 7):
+            three_ws.cell(row_index, column).fill = fill
+    set_excel_sheet_options(three_ws, True, "A6")
 
+    weekly_ws = wb.create_sheet("주간 실천표")
     set_excel_title(
-        worksheet=weekly_sheet,
-        title="요일별 주간 실천표",
-        subtitle=(
-            "요일별 목표를 확인하고 실천 후 "
-            "완료 여부를 직접 표시할 수 있습니다."
-        ),
-        last_column=6
+        weekly_ws,
+        "요일별 주간 실천표",
+        "요일별 목표를 확인하고 실천 후 완료 여부를 직접 표시할 수 있습니다.",
+        6,
     )
-
-    weekly_headers = [
-        "요일",
-        "공부 목표",
-        "출석 목표",
-        "수면 목표",
-        "스크린타임 목표",
-        "완료 여부"
-    ]
-
     weekly_rows = []
-
-    for _, row in weekly_plan[
-        "weekly_df"
-    ].iterrows():
+    for _, row in weekly_plan["weekly_df"].iterrows():
         day = row["요일"]
-
-        weekly_rows.append([
-            day,
-            row["공부 목표"],
-            row["출석 목표"],
-            row["수면 목표"],
-            row["스크린타임 목표"],
-            (
-                "완료"
-                if day in completed_days
-                else "미완료"
-            )
-        ])
-
+        weekly_rows.append(
+            [
+                day,
+                row["공부 목표"],
+                row["출석 목표"],
+                row["수면 목표"],
+                row["스크린타임 목표"],
+                "완료" if day in completed_days else "미완료",
+            ]
+        )
     write_excel_table(
-        worksheet=weekly_sheet,
-        start_row=5,
-        headers=weekly_headers,
-        rows=weekly_rows,
-        widths={
-            1: 12,
-            2: 24,
-            3: 20,
-            4: 16,
-            5: 22,
-            6: 14
-        }
-    )
-
-    for row_index, row_values in enumerate(
+        weekly_ws,
+        5,
+        ["요일", "공부 목표", "출석 목표", "수면 목표", "스크린타임 목표", "완료 여부"],
         weekly_rows,
-        start=6
-    ):
-        status_cell = weekly_sheet.cell(
-            row=row_index,
-            column=6
-        )
-
+        widths={1: 12, 2: 24, 3: 20, 4: 16, 5: 22, 6: 14},
+    )
+    for row_index, row_values in enumerate(weekly_rows, 6):
+        status = weekly_ws.cell(row_index, 6)
         if row_values[5] == "완료":
-            status_cell.fill = EXCEL_GREEN_FILL
-            status_cell.font = Font(
-                bold=True,
-                color="008000"
-            )
-
+            status.fill = GREEN_FILL
+            status.font = Font(bold=True, color="008000")
         else:
-            status_cell.fill = EXCEL_GRAY_FILL
-            status_cell.font = Font(
-                color="666666"
-            )
+            status.fill = GRAY_FILL
+            status.font = Font(color="666666")
+    set_excel_sheet_options(weekly_ws, True, "A6")
 
-    set_excel_sheet_options(
-        worksheet=weekly_sheet,
-        landscape=True,
-        freeze_panes="A6"
-    )
-
-    # -----------------------------------------------------
-    # 실천 체크리스트
-    # -----------------------------------------------------
-    checklist_sheet = workbook.create_sheet(
-        "실천 체크리스트"
-    )
-
+    checklist_ws = wb.create_sheet("실천 체크리스트")
     set_excel_title(
-        worksheet=checklist_sheet,
-        title="일주일 실천 체크리스트",
-        subtitle=(
-            "평일·주말 핵심 행동과 "
-            "매일 확인할 항목을 정리했습니다."
-        ),
-        last_column=3
+        checklist_ws,
+        "일주일 실천 체크리스트",
+        "평일·주말 핵심 행동과 매일 확인할 항목을 정리했습니다.",
+        3,
     )
-
-    checklist_rows = []
-
-    for action in weekly_plan[
-        "weekday_actions"
-    ]:
-        checklist_rows.append([
-            "평일 핵심 행동",
-            action,
-            "□"
-        ])
-
-    for action in weekly_plan[
-        "weekend_actions"
-    ]:
-        checklist_rows.append([
-            "주말 핵심 행동",
-            action,
-            "□"
-        ])
-
-    for goal in weekly_plan[
-        "core_goals"
-    ]:
-        checklist_rows.append([
-            "이번 주 목표",
-            goal,
-            "□"
-        ])
-
-    for item in weekly_plan[
-        "check_items"
-    ]:
-        checklist_rows.append([
-            "매일 확인",
-            item,
-            "□"
-        ])
-
+    checklist_rows = (
+        [["평일 핵심 행동", action, "□"] for action in weekly_plan["weekday_actions"]]
+        + [["주말 핵심 행동", action, "□"] for action in weekly_plan["weekend_actions"]]
+        + [["이번 주 목표", goal, "□"] for goal in weekly_plan["core_goals"]]
+        + [["매일 확인", item, "□"] for item in weekly_plan["check_items"]]
+    )
     write_excel_table(
-        worksheet=checklist_sheet,
-        start_row=5,
-        headers=[
-            "구분",
-            "실천 내용",
-            "확인"
-        ],
-        rows=checklist_rows,
-        widths={
-            1: 20,
-            2: 52,
-            3: 12
-        }
+        checklist_ws,
+        5,
+        ["구분", "실천 내용", "확인"],
+        checklist_rows,
+        widths={1: 20, 2: 52, 3: 12},
     )
+    set_excel_sheet_options(checklist_ws, False, "A6")
 
-    set_excel_sheet_options(
-        worksheet=checklist_sheet,
-        landscape=False,
-        freeze_panes="A6"
-    )
-
-    # -----------------------------------------------------
-    # 세부 분석
-    # -----------------------------------------------------
-    detail_sheet = workbook.create_sheet(
-        "세부 분석"
-    )
-
+    detail_ws = wb.create_sheet("세부 분석")
     set_excel_title(
-        worksheet=detail_sheet,
-        title="선택 계획 세부 분석",
-        subtitle=(
-            "모델 예측값과 변화 부담 등 "
-            "분석용 세부 정보를 포함합니다."
-        ),
-        last_column=2
+        detail_ws,
+        "선택 계획 세부 분석",
+        "모델 예측값과 변화 부담 등 분석용 세부 정보를 포함합니다.",
+        2,
     )
-
-    detail_values = [
-        (
-            "추천 유형",
-            selected_plan["추천 유형"]
-        ),
-        (
-            "공부 시간",
-            float(
-                selected_plan["공부 시간"]
-            )
-        ),
-        (
-            "출석률",
-            float(
-                selected_plan["출석률"]
-            )
-        ),
-        (
-            "수면 시간",
-            float(
-                selected_plan["수면 시간"]
-            )
-        ),
-        (
-            "스크린타임",
-            float(
-                selected_plan["스크린타임"]
-            )
-        ),
-        (
-            "신체활동",
-            float(
-                selected_plan["신체활동"]
-            )
-        ),
-        (
-            "스트레스",
-            float(
-                selected_plan["스트레스"]
-            )
-        ),
-        (
-            "예상 환산 점수",
-            float(
-                selected_plan["예상 환산 점수"]
-            )
-        ),
-        (
-            "원본 예측 점수",
-            float(
-                selected_plan["원본 예측 점수"]
-            )
-        ),
-        (
-            "현재 대비 점수 변화",
-            float(
-                selected_plan["현재 대비 점수 변화"]
-            )
-        ),
-        (
-            "변화 부담",
-            selected_plan["변화 부담"]
-        ),
-        (
-            "변화 부담 수치",
-            float(
-                selected_plan["변화 부담 수치"]
-            )
-        ),
-        (
-            "실행 난이도",
-            selected_plan["실행 난이도"]
-        ),
-        (
-            "실행 난이도 점수",
-            int(
-                selected_plan["실행 난이도 점수"]
-            )
-        ),
-        (
-            "주요 생활시간 합계",
-            float(
-                selected_plan["주요 생활시간 합계"]
-            )
-        ),
-        (
-            "추천 이유",
-            selected_plan["추천 이유"]
-        )
-    ]
-
-    write_excel_key_value_section(
-        worksheet=detail_sheet,
-        start_row=5,
-        title="모델 및 추천 세부 정보",
-        values=detail_values,
-        value_column_width=46
+    write_key_value_section(
+        detail_ws,
+        5,
+        "모델 및 추천 세부 정보",
+        [
+            ("추천 유형", selected_plan["추천 유형"]),
+            ("공부 시간", float(selected_plan["공부 시간"])),
+            ("출석률", float(selected_plan["출석률"])),
+            ("수면 시간", float(selected_plan["수면 시간"])),
+            ("스크린타임", float(selected_plan["스크린타임"])),
+            ("신체활동", float(selected_plan["신체활동"])),
+            ("스트레스", float(selected_plan["스트레스"])),
+            ("예상 학업성과 점수", float(selected_plan["예상 환산 점수"])),
+            ("원본 예측 점수", float(selected_plan["원본 예측 점수"])),
+            ("현재 대비 점수 변화", float(selected_plan["현재 대비 점수 변화"])),
+            ("변화 부담", selected_plan["변화 부담"]),
+            ("변화 부담 수치", float(selected_plan["변화 부담 수치"])),
+            ("실행 난이도", selected_plan["실행 난이도"]),
+            ("실행 난이도 점수", int(selected_plan["실행 난이도 점수"])),
+            ("주요 생활시간 합계", float(selected_plan["주요 생활시간 합계"])),
+            ("추천 이유", selected_plan["추천 이유"]),
+        ],
+        46,
     )
-
-    for row_index in range(
-        7,
-        7 + len(detail_values)
-    ):
-        value_cell = detail_sheet.cell(
-            row=row_index,
-            column=2
-        )
-
-        if isinstance(
-            value_cell.value,
-            float
-        ):
-            value_cell.number_format = "0.0000"
-
-    set_excel_sheet_options(
-        worksheet=detail_sheet,
-        landscape=False,
-        freeze_panes="A6"
-    )
+    set_excel_sheet_options(detail_ws, False, "A6")
 
     output = BytesIO()
-    workbook.save(output)
-    output.seek(0)
-
+    wb.save(output)
     return output.getvalue()
 
 
 # =========================================================
-# 체크박스 상태 관리
+# 세션 상태
 # =========================================================
 def clear_daily_checkboxes():
-    keys_to_delete = [
-        key
-        for key in st.session_state.keys()
-        if str(key).startswith(
-            "daily_check_"
-        )
-    ]
-
-    for key in keys_to_delete:
-        del st.session_state[key]
+    for key in list(st.session_state.keys()):
+        if str(key).startswith("daily_check_"):
+            del st.session_state[key]
 
 
-# =========================================================
-# 세션 상태 초기화
-# =========================================================
 DEFAULT_SESSION_VALUES = {
     "current_values": None,
     "prediction_result": None,
@@ -2706,118 +1127,50 @@ DEFAULT_SESSION_VALUES = {
     "recommendation_result": None,
     "recommendation_conditions": None,
     "selected_recommendation_type": None,
-    "previous_recommendation_type": None
+    "previous_recommendation_type": None,
 }
-
-for key, default_value in DEFAULT_SESSION_VALUES.items():
-    if key not in st.session_state:
-        st.session_state[key] = default_value
+for key, value in DEFAULT_SESSION_VALUES.items():
+    st.session_state.setdefault(key, value)
 
 
 # =========================================================
-# 상단 소개
+# 상단
 # =========================================================
 st.title("🎓 Campus Twin")
-
-st.subheader(
-    "AI 기반 대학생활 시뮬레이션 및 생활계획 추천"
+st.subheader("AI 기반 대학생활 시뮬레이션 및 생활계획 추천")
+st.write(
+    """
+    생활습관을 바탕으로 학업성과를 분석하고 미래 계획을 시뮬레이션합니다.
+    목표와 현실적인 조건을 입력하면 추천안을 탐색하고,
+    선택한 추천안을 3주 단계계획과 일주일 실천표로 변환합니다.
+    """
+)
+st.warning(
+    "학업성과 환산 점수는 실제 학교 성적이나 공식 GPA가 아닙니다. "
+    "모델의 원본 예측값을 4.5점 범위로 변환한 참고용 지표입니다."
 )
 
-st.write("""
-생활습관을 바탕으로 학업성과를 분석하고,
-미래 계획을 시뮬레이션할 수 있습니다.
-
-목표와 현실적인 조건을 입력하면 추천 계획을 탐색하고,
-선택한 추천안을 3주 단계계획과 일주일 실천표로 변환합니다.
-""")
-
-st.warning("""
-학업성과 환산 점수는 실제 학교 성적이나 공식 GPA가 아닙니다.
-모델의 원본 예측값을 4.5점 범위로 변환한 참고용 지표입니다.
-""")
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["현재 상태", "개인별 분석", "미래 시뮬레이션", "추천 계획", "프로젝트 설명"]
+)
 
 
 # =========================================================
-# 탭 구성
-# =========================================================
-(
-    tab1,
-    tab2,
-    tab3,
-    tab4,
-    tab5
-) = st.tabs([
-    "현재 상태",
-    "개인별 분석",
-    "미래 시뮬레이션",
-    "추천 계획",
-    "프로젝트 설명"
-])
-
-
-# =========================================================
-# 탭 1: 현재 상태
+# 현재 상태
 # =========================================================
 with tab1:
     st.header("현재 생활습관 입력")
+    left, right = st.columns(2)
 
-    input_col1, input_col2 = st.columns(2)
+    with left:
+        study_hours = st.number_input("하루 공부 시간", 0.0, 12.0, 4.0, 0.5, key="current_study")
+        attendance = st.number_input("출석률", 0.0, 100.0, 85.0, 1.0, key="current_attendance")
+        sleep_hours = st.number_input("하루 수면 시간", 0.0, 12.0, 7.0, 0.5, key="current_sleep")
 
-    with input_col1:
-        study_hours = st.number_input(
-            "하루 공부 시간",
-            min_value=0.0,
-            max_value=12.0,
-            value=4.0,
-            step=0.5,
-            key="current_study"
-        )
-
-        attendance = st.number_input(
-            "출석률",
-            min_value=0.0,
-            max_value=100.0,
-            value=85.0,
-            step=1.0,
-            key="current_attendance"
-        )
-
-        sleep_hours = st.number_input(
-            "하루 수면 시간",
-            min_value=0.0,
-            max_value=12.0,
-            value=7.0,
-            step=0.5,
-            key="current_sleep"
-        )
-
-    with input_col2:
-        screen_time = st.number_input(
-            "하루 스크린타임",
-            min_value=0.0,
-            max_value=16.0,
-            value=5.0,
-            step=0.5,
-            key="current_screen"
-        )
-
-        physical_activity = st.number_input(
-            "하루 신체활동 시간",
-            min_value=0.0,
-            max_value=8.0,
-            value=1.0,
-            step=0.5,
-            key="current_activity"
-        )
-
-        stress = st.slider(
-            "스트레스 수준",
-            min_value=1.0,
-            max_value=10.0,
-            value=5.0,
-            step=0.5,
-            key="current_stress"
-        )
+    with right:
+        screen_time = st.number_input("하루 스크린타임", 0.0, 16.0, 5.0, 0.5, key="current_screen")
+        physical_activity = st.number_input("하루 신체활동 시간", 0.0, 8.0, 1.0, 0.5, key="current_activity")
+        stress = st.slider("스트레스 수준", 1.0, 10.0, 5.0, 0.5, key="current_stress")
 
     current_values = {
         "study_hours": study_hours,
@@ -2825,941 +1178,387 @@ with tab1:
         "sleep_hours": sleep_hours,
         "screen_time": screen_time,
         "physical_activity": physical_activity,
-        "stress": stress
+        "stress": stress,
     }
 
-    total_hours = calculate_total_hours(
-        current_values
-    )
-
-    st.caption(
-        f"입력된 주요 생활시간 합계: "
-        f"{total_hours:.1f}시간"
-    )
-
+    total_hours = calculate_total_hours(current_values)
+    st.caption(f"입력된 주요 생활시간 합계: {total_hours:.1f}시간")
     if total_hours > 24:
-        st.warning(
-            "주요 생활시간 합이 하루 24시간을 초과합니다."
-        )
+        st.warning("주요 생활시간 합이 하루 24시간을 초과합니다.")
 
-    if st.button(
-        "현재 상태 분석하기",
-        type="primary"
-    ):
+    if st.button("현재 상태 분석하기", type="primary"):
         try:
-            st.session_state.current_values = (
-                current_values.copy()
-            )
-
-            st.session_state.prediction_result = (
-                predict_from_values(
-                    current_values
-                )
-            )
-
-            st.session_state.sensitivity_df = (
-                analyze_sensitivity(
-                    current_values
-                )
-            )
-
+            st.session_state.current_values = current_values.copy()
+            st.session_state.prediction_result = predict_from_values(current_values)
+            st.session_state.sensitivity_df = analyze_sensitivity(current_values)
             st.session_state.comparison_result = None
             st.session_state.recommendation_result = None
             st.session_state.recommendation_conditions = None
             st.session_state.selected_recommendation_type = None
             st.session_state.previous_recommendation_type = None
-
             clear_daily_checkboxes()
-
-            if (
-                "recommendation_selector"
-                in st.session_state
-            ):
-                del st.session_state[
-                    "recommendation_selector"
-                ]
-
+            st.session_state.pop("recommendation_selector", None)
         except Exception as error:
-            st.error(
-                "예측 중 오류가 발생했습니다."
-            )
+            st.error("예측 중 오류가 발생했습니다.")
             st.exception(error)
 
     if st.session_state.prediction_result is not None:
-        prediction_result = (
-            st.session_state.prediction_result
-        )
-
+        result = st.session_state.prediction_result
         st.divider()
         st.subheader("예측 결과")
-
-        result_col1, result_col2 = st.columns(2)
-
-        with result_col1:
-            st.metric(
-                "학업성과 환산 점수",
-                (
-                    f"{prediction_result['display_score']:.2f}"
-                    f" / {DISPLAY_SCORE_MAX:.2f}"
-                )
-            )
-
-        with result_col2:
-            st.metric(
-                "모델 원본 예측 점수",
-                f"{prediction_result['raw_score']:.3f}"
-            )
-
-        st.caption(
-            "예측 결과는 실제 성적을 확정하거나 보장하지 않습니다."
-        )
+        col1, col2 = st.columns(2)
+        col1.metric("학업성과 환산 점수", f"{result['display_score']:.2f} / {DISPLAY_SCORE_MAX:.2f}")
+        col2.metric("모델 원본 예측 점수", f"{result['raw_score']:.3f}")
+        st.caption("예측 결과는 실제 성적을 확정하거나 보장하지 않습니다.")
 
 
 # =========================================================
-# 탭 2: 개인별 분석
+# 개인별 분석
 # =========================================================
 with tab2:
     st.header("개인별 민감도 분석")
 
-    if (
-        st.session_state.current_values is None
-        or st.session_state.sensitivity_df is None
-    ):
-        st.info(
-            "'현재 상태' 탭에서 먼저 분석해 주세요."
-        )
-
+    if st.session_state.current_values is None or st.session_state.sensitivity_df is None:
+        st.info("'현재 상태' 탭에서 먼저 분석해 주세요.")
     else:
-        sensitivity_df = (
-            st.session_state.sensitivity_df.copy()
-        )
+        sensitivity = st.session_state.sensitivity_df.copy()
+        display = sensitivity.copy()
+        display["현재 값"] = display["현재 값"].map(lambda x: f"{x:.1f}")
+        display["변경 값"] = display["변경 값"].map(lambda x: f"{x:.1f}")
+        display["변경 후 환산 점수"] = display["변경 후 환산 점수"].map(lambda x: f"{x:.2f}")
+        display["환산 점수 변화량"] = display["환산 점수 변화량"].map(lambda x: f"{x:+.3f}")
+        display["원본 점수 변화량"] = display["원본 점수 변화량"].map(lambda x: f"{x:+.4f}")
 
-        display_df = sensitivity_df.copy()
+        st.dataframe(display, use_container_width=True, hide_index=True)
+        chart = sensitivity[["생활요인 변화", "환산 점수 변화량"]].set_index("생활요인 변화")
+        st.bar_chart(chart, use_container_width=True)
 
-        display_df["현재 값"] = (
-            display_df["현재 값"]
-            .map(lambda value: f"{value:.1f}")
-        )
-
-        display_df["변경 값"] = (
-            display_df["변경 값"]
-            .map(lambda value: f"{value:.1f}")
-        )
-
-        display_df["변경 후 환산 점수"] = (
-            display_df["변경 후 환산 점수"]
-            .map(lambda value: f"{value:.2f}")
-        )
-
-        display_df["환산 점수 변화량"] = (
-            display_df["환산 점수 변화량"]
-            .map(lambda value: f"{value:+.3f}")
-        )
-
-        display_df["원본 점수 변화량"] = (
-            display_df["원본 점수 변화량"]
-            .map(lambda value: f"{value:+.4f}")
-        )
-
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        chart_df = sensitivity_df[
-            [
-                "생활요인 변화",
-                "환산 점수 변화량"
-            ]
-        ].set_index(
-            "생활요인 변화"
-        )
-
-        st.bar_chart(
-            chart_df,
-            use_container_width=True
-        )
-
-        best_result = sensitivity_df.iloc[0]
-
+        best = sensitivity.iloc[0]
         st.success(
-            f"가장 큰 예측 상승 요인: "
-            f"{best_result['생활요인 변화']} "
-            f"({best_result['환산 점수 변화량']:+.3f})"
+            f"가장 큰 예측 상승 요인: {best['생활요인 변화']} "
+            f"({best['환산 점수 변화량']:+.3f})"
         )
-
-        st.caption(
-            "모델 예측 반응이며 실제 인과관계를 의미하지 않습니다."
-        )
+        st.caption("모델 예측 반응이며 실제 인과관계를 의미하지 않습니다.")
 
 
 # =========================================================
-# 탭 3: 미래 시뮬레이션
+# 미래 시뮬레이션
 # =========================================================
 with tab3:
     st.header("미래 생활계획 시뮬레이션")
 
     if st.session_state.current_values is None:
-        st.info(
-            "'현재 상태' 탭에서 먼저 분석해 주세요."
-        )
-
+        st.info("'현재 상태' 탭에서 먼저 분석해 주세요.")
     else:
         current = st.session_state.current_values
+        left, right = st.columns(2)
 
-        future_col1, future_col2 = st.columns(2)
+        with left:
+            future_study = st.number_input("계획 공부 시간", 0.0, 12.0, float(current["study_hours"]), 0.5, key="future_study")
+            future_attendance = st.number_input("계획 출석률", 0.0, 100.0, float(current["attendance"]), 1.0, key="future_attendance")
+            future_sleep = st.number_input("계획 수면 시간", 0.0, 12.0, float(current["sleep_hours"]), 0.5, key="future_sleep")
 
-        with future_col1:
-            future_study = st.number_input(
-                "계획 공부 시간",
-                0.0,
-                12.0,
-                float(
-                    current["study_hours"]
-                ),
-                0.5,
-                key="future_study"
-            )
+        with right:
+            future_screen = st.number_input("계획 스크린타임", 0.0, 16.0, float(current["screen_time"]), 0.5, key="future_screen")
+            future_activity = st.number_input("계획 신체활동 시간", 0.0, 8.0, float(current["physical_activity"]), 0.5, key="future_activity")
+            future_stress = st.slider("계획 스트레스 수준", 1.0, 10.0, float(current["stress"]), 0.5, key="future_stress")
 
-            future_attendance = st.number_input(
-                "계획 출석률",
-                0.0,
-                100.0,
-                float(
-                    current["attendance"]
-                ),
-                1.0,
-                key="future_attendance"
-            )
-
-            future_sleep = st.number_input(
-                "계획 수면 시간",
-                0.0,
-                12.0,
-                float(
-                    current["sleep_hours"]
-                ),
-                0.5,
-                key="future_sleep"
-            )
-
-        with future_col2:
-            future_screen = st.number_input(
-                "계획 스크린타임",
-                0.0,
-                16.0,
-                float(
-                    current["screen_time"]
-                ),
-                0.5,
-                key="future_screen"
-            )
-
-            future_activity = st.number_input(
-                "계획 신체활동 시간",
-                0.0,
-                8.0,
-                float(
-                    current["physical_activity"]
-                ),
-                0.5,
-                key="future_activity"
-            )
-
-            future_stress = st.slider(
-                "계획 스트레스 수준",
-                1.0,
-                10.0,
-                float(
-                    current["stress"]
-                ),
-                0.5,
-                key="future_stress"
-            )
-
-        future_values = {
+        future = {
             "study_hours": future_study,
             "attendance": future_attendance,
             "sleep_hours": future_sleep,
             "screen_time": future_screen,
             "physical_activity": future_activity,
-            "stress": future_stress
+            "stress": future_stress,
         }
 
-        if st.button(
-            "현재 계획과 비교하기",
-            type="primary"
-        ):
+        if st.button("현재 계획과 비교하기", type="primary"):
             try:
-                st.session_state.comparison_result = (
-                    compare_plans(
-                        current,
-                        future_values
-                    )
-                )
-
+                st.session_state.comparison_result = compare_plans(current, future)
             except Exception as error:
-                st.error(
-                    "미래 계획 비교 중 오류가 발생했습니다."
-                )
+                st.error("미래 계획 비교 중 오류가 발생했습니다.")
                 st.exception(error)
 
         if st.session_state.comparison_result is not None:
-            comparison_result = (
-                st.session_state.comparison_result
-            )
-
+            result = st.session_state.comparison_result
             st.divider()
-
-            metric_col1, metric_col2, metric_col3 = (
-                st.columns(3)
-            )
-
-            metric_col1.metric(
-                "현재 점수",
-                (
-                    f"{comparison_result['current_display_score']:.2f}"
-                )
-            )
-
-            metric_col2.metric(
-                "미래 점수",
-                (
-                    f"{comparison_result['future_display_score']:.2f}"
-                )
-            )
-
-            metric_col3.metric(
-                "예상 변화",
-                (
-                    f"{comparison_result['display_score_change']:+.2f}"
-                )
-            )
-
-            st.dataframe(
-                comparison_result[
-                    "comparison_df"
-                ],
-                use_container_width=True,
-                hide_index=True
-            )
+            col1, col2, col3 = st.columns(3)
+            col1.metric("현재 학업성과 점수", f"{result['current_display_score']:.2f}")
+            col2.metric("미래 학업성과 점수", f"{result['future_display_score']:.2f}")
+            col3.metric("예상 변화", f"{result['display_score_change']:+.2f}")
+            st.dataframe(result["comparison_df"], use_container_width=True, hide_index=True)
 
 
 # =========================================================
-# 탭 4: 추천 계획
+# 추천 계획
 # =========================================================
 with tab4:
     st.header("목표 기반 추천 계획")
 
     if st.session_state.current_values is None:
-        st.info(
-            "'현재 상태' 탭에서 먼저 분석해 주세요."
-        )
-
+        st.info("'현재 상태' 탭에서 먼저 분석해 주세요.")
     else:
         current = st.session_state.current_values
-
-        current_prediction = predict_from_values(
-            current
-        )
-
+        current_prediction = predict_from_values(current)
         st.metric(
             "현재 학업성과 환산 점수",
-            (
-                f"{current_prediction['display_score']:.2f}"
-                f" / {DISPLAY_SCORE_MAX:.2f}"
-            )
+            f"{current_prediction['display_score']:.2f} / {DISPLAY_SCORE_MAX:.2f}",
         )
 
         st.subheader("목표 및 현실성 조건")
+        left, right = st.columns(2)
 
-        condition_col1, condition_col2 = (
-            st.columns(2)
-        )
-
-        with condition_col1:
+        with left:
             default_target = min(
                 DISPLAY_SCORE_MAX,
-                round(
-                    current_prediction[
-                        "display_score"
-                    ] + 0.3,
-                    1
-                )
+                round(current_prediction["display_score"] + 0.3, 1),
             )
-
             target_score = st.number_input(
                 "목표 학업성과 환산 점수",
-                min_value=0.0,
-                max_value=DISPLAY_SCORE_MAX,
-                value=float(
-                    default_target
-                ),
-                step=0.1
+                0.0,
+                DISPLAY_SCORE_MAX,
+                float(default_target),
+                0.1,
             )
-
             max_study = st.number_input(
                 "하루 최대 공부 시간",
-                min_value=float(
-                    current["study_hours"]
-                ),
-                max_value=12.0,
-                value=float(
-                    min(
-                        12.0,
-                        current[
-                            "study_hours"
-                        ] + 2.0
-                    )
-                ),
-                step=0.5
+                float(current["study_hours"]),
+                12.0,
+                float(min(12.0, current["study_hours"] + 2.0)),
+                0.5,
             )
-
             min_sleep = st.number_input(
                 "반드시 확보할 최소 수면 시간",
-                min_value=0.0,
-                max_value=12.0,
-                value=float(
-                    current["sleep_hours"]
-                ),
-                step=0.5
+                0.0,
+                12.0,
+                float(current["sleep_hours"]),
+                0.5,
             )
 
-        with condition_col2:
+        with right:
             max_screen_reduction = st.number_input(
                 "줄일 수 있는 최대 스크린타임",
-                min_value=0.0,
-                max_value=float(
-                    current["screen_time"]
-                ),
-                value=float(
-                    min(
-                        2.0,
-                        current[
-                            "screen_time"
-                        ]
-                    )
-                ),
-                step=0.5
+                0.0,
+                float(current["screen_time"]),
+                float(min(2.0, current["screen_time"])),
+                0.5,
             )
-
             max_attendance_increase = st.number_input(
                 "가능한 출석률 최대 증가폭",
-                min_value=0.0,
-                max_value=float(
-                    100.0
-                    - current["attendance"]
-                ),
-                value=float(
-                    min(
-                        10.0,
-                        100.0
-                        - current["attendance"]
-                    )
-                ),
-                step=1.0
+                0.0,
+                float(100.0 - current["attendance"]),
+                float(min(10.0, 100.0 - current["attendance"])),
+                1.0,
             )
-
             changeable_labels = st.multiselect(
                 "변경 가능한 생활요인",
-                options=[
-                    "공부 시간",
-                    "출석률",
-                    "수면 시간",
-                    "스크린타임"
-                ],
-                default=[
-                    "공부 시간",
-                    "출석률",
-                    "수면 시간",
-                    "스크린타임"
-                ]
+                ["공부 시간", "출석률", "수면 시간", "스크린타임"],
+                ["공부 시간", "출석률", "수면 시간", "스크린타임"],
             )
 
-        changeable_features = [
-            LABEL_TO_FEATURE[label]
-            for label in changeable_labels
-        ]
+        changeable_features = [LABEL_TO_FEATURE[label] for label in changeable_labels]
 
-        if st.button(
-            "추천 계획 찾기",
-            type="primary"
-        ):
+        if st.button("추천 계획 찾기", type="primary"):
             if not changeable_features:
-                st.warning(
-                    "변경 가능한 생활요인을 "
-                    "한 개 이상 선택해 주세요."
-                )
-
-            elif min_sleep > (
-                current["sleep_hours"] + 1.5
-            ):
-                st.warning(
-                    "최소 수면시간을 현재보다 "
-                    "1.5시간 이내로 설정해 주세요."
-                )
-
+                st.warning("변경 가능한 생활요인을 한 개 이상 선택해 주세요.")
+            elif min_sleep > current["sleep_hours"] + 1.5:
+                st.warning("최소 수면시간을 현재보다 1.5시간 이내로 설정해 주세요.")
             else:
                 try:
-                    with st.spinner(
-                        "가능한 생활계획을 탐색하고 있습니다."
-                    ):
-                        candidates = (
-                            generate_recommendation_candidates(
-                                current_values=current,
-                                target_score=target_score,
-                                changeable_features=(
-                                    changeable_features
-                                ),
-                                max_study=max_study,
-                                min_sleep=min_sleep,
-                                max_screen_reduction=(
-                                    max_screen_reduction
-                                ),
-                                max_attendance_increase=(
-                                    max_attendance_increase
-                                )
-                            )
+                    with st.spinner("가능한 생활계획을 탐색하고 있습니다."):
+                        candidates = generate_recommendation_candidates(
+                            current,
+                            target_score,
+                            changeable_features,
+                            max_study,
+                            min_sleep,
+                            max_screen_reduction,
+                            max_attendance_increase,
                         )
-
-                        result = select_recommendations(
-                            candidates,
-                            target_score
+                        st.session_state.recommendation_result = select_recommendations(
+                            candidates, target_score
                         )
-
-                        st.session_state.recommendation_result = (
-                            result
-                        )
-
                         st.session_state.recommendation_conditions = {
                             "target_score": target_score,
-                            "candidate_count": len(
-                                candidates
-                            )
+                            "candidate_count": len(candidates),
                         }
-
                         st.session_state.selected_recommendation_type = None
                         st.session_state.previous_recommendation_type = None
-
                         clear_daily_checkboxes()
-
-                        if (
-                            "recommendation_selector"
-                            in st.session_state
-                        ):
-                            del st.session_state[
-                                "recommendation_selector"
-                            ]
-
+                        st.session_state.pop("recommendation_selector", None)
                 except Exception as error:
-                    st.error(
-                        "추천 계획 탐색 중 오류가 발생했습니다."
-                    )
+                    st.error("추천 계획 탐색 중 오류가 발생했습니다.")
                     st.exception(error)
 
-        if (
-            st.session_state.recommendation_result
-            is not None
-        ):
-            result = (
-                st.session_state.recommendation_result
-            )
-
-            conditions = (
-                st.session_state.recommendation_conditions
-            )
-
-            recommendations = result[
-                "recommendations"
-            ]
+        if st.session_state.recommendation_result is not None:
+            result = st.session_state.recommendation_result
+            conditions = st.session_state.recommendation_conditions
+            recommendations = result["recommendations"]
 
             st.divider()
             st.header("추천 결과")
-
-            st.caption(
-                f"총 "
-                f"{conditions['candidate_count']:,}개 "
-                "후보 계획을 평가했습니다."
-            )
+            st.caption(f"총 {conditions['candidate_count']:,}개 후보 계획을 평가했습니다.")
 
             if recommendations.empty:
-                st.error(
-                    "추천안을 생성하지 못했습니다. "
-                    "조건 범위를 넓혀 주세요."
-                )
-
+                st.error("추천안을 생성하지 못했습니다. 조건 범위를 넓혀 주세요.")
             else:
                 if result["target_reached"]:
-                    st.success(
-                        "목표 점수를 달성하는 후보를 찾았습니다."
-                    )
-
+                    st.success("목표 점수를 달성하는 후보를 찾았습니다.")
                 else:
-                    st.warning(
-                        "목표에는 도달하지 못했지만 "
-                        "현재보다 개선되는 후보를 제시합니다."
-                    )
+                    st.warning("목표에는 도달하지 못했지만 현재보다 개선되는 후보를 제시합니다.")
 
-                recommendation_types = (
-                    recommendations[
-                        "추천 유형"
-                    ].tolist()
+                types = recommendations["추천 유형"].tolist()
+                default_index = (
+                    types.index(st.session_state.selected_recommendation_type)
+                    if st.session_state.selected_recommendation_type in types
+                    else 0
                 )
-
-                default_index = 0
-
-                if (
-                    st.session_state.selected_recommendation_type
-                    in recommendation_types
-                ):
-                    default_index = (
-                        recommendation_types.index(
-                            st.session_state.selected_recommendation_type
-                        )
-                    )
-
                 selected_type = st.radio(
                     "일주일 계획으로 사용할 추천안을 선택하세요.",
-                    options=recommendation_types,
+                    types,
                     index=default_index,
                     horizontal=True,
-                    key="recommendation_selector"
+                    key="recommendation_selector",
                 )
 
-                if (
-                    st.session_state.previous_recommendation_type
-                    != selected_type
-                ):
+                if st.session_state.previous_recommendation_type != selected_type:
                     clear_daily_checkboxes()
-
-                    st.session_state.previous_recommendation_type = (
-                        selected_type
-                    )
-
-                st.session_state.selected_recommendation_type = (
-                    selected_type
-                )
+                    st.session_state.previous_recommendation_type = selected_type
+                st.session_state.selected_recommendation_type = selected_type
 
                 st.subheader("추천안 카드")
-
-                card_columns = st.columns(
-                    len(recommendations)
-                )
-
-                for column, (_, row) in zip(
-                    card_columns,
-                    recommendations.iterrows()
-                ):
+                columns = st.columns(len(recommendations))
+                for column, (_, row) in zip(columns, recommendations.iterrows()):
                     with column:
-                        card_html = (
-                            build_recommendation_card_html(
-                                row=row,
-                                current_values=current,
-                                selected_type=(
-                                    selected_type
-                                )
-                            )
-                        )
-
                         st.markdown(
-                            card_html,
-                            unsafe_allow_html=True
+                            build_recommendation_card_html(row, current, selected_type),
+                            unsafe_allow_html=True,
                         )
 
                 selected_plan = recommendations[
-                    recommendations["추천 유형"]
-                    == selected_type
+                    recommendations["추천 유형"] == selected_type
                 ].iloc[0]
 
-                st.success(
-                    f"선택한 추천안: "
-                    f"**{selected_type}**"
-                )
-
+                st.success(f"선택한 추천안: **{selected_type}**")
                 st.header("선택한 계획 요약")
-
-                summary_col1, summary_col2, summary_col3 = (
-                    st.columns(3)
+                col1, col2, col3 = st.columns(3)
+                col1.metric(
+                    "예상 학업성과 점수",
+                    f"{selected_plan['예상 환산 점수']:.2f} / {DISPLAY_SCORE_MAX:.2f}",
                 )
-
-                summary_col1.metric(
-                    "예상 점수",
-                    (
-                        f"{selected_plan['예상 환산 점수']:.2f}"
-                        f" / {DISPLAY_SCORE_MAX:.2f}"
-                    )
-                )
-
-                summary_col2.metric(
+                col2.metric(
                     "현재 대비 변화",
-                    (
-                        f"{selected_plan['현재 대비 점수 변화']:+.2f}"
-                    )
+                    f"{selected_plan['현재 대비 점수 변화']:+.2f}",
                 )
-
-                summary_col3.metric(
+                col3.metric(
                     "실행 난이도",
-                    (
-                        f"{selected_plan['실행 난이도 점수']}"
-                        " / 5"
-                    )
+                    f"{selected_plan['실행 난이도 점수']} / 5",
                 )
 
-                st.write(
-                    "**생활 변화:** "
-                    + build_change_summary(
-                        current,
-                        selected_plan
-                    )
-                )
+                st.write("**생활 변화:** " + build_change_summary(current, selected_plan))
+                st.write("**추천 이유:** " + selected_plan["추천 이유"])
 
-                st.write(
-                    "**추천 이유:** "
-                    + selected_plan["추천 이유"]
+                css_class, title, message = get_difficulty_message(
+                    int(selected_plan["실행 난이도 점수"])
                 )
-
-                difficulty_info = (
-                    get_difficulty_message(
-                        int(
-                            selected_plan[
-                                "실행 난이도 점수"
-                            ]
-                        )
-                    )
-                )
-
                 st.markdown(
-                    (
-                        f'<div class="'
-                        f'{difficulty_info["class_name"]}'
-                        f'">'
-                        f'<b>'
-                        f'{escape(difficulty_info["title"])}'
-                        f'</b><br>'
-                        f'{escape(difficulty_info["message"])}'
-                        f'</div>'
-                    ),
-                    unsafe_allow_html=True
+                    f'<div class="{css_class}"><b>{escape(title)}</b><br>{escape(message)}</div>',
+                    unsafe_allow_html=True,
                 )
 
-                # -----------------------------------------
-                # 3주 단계적 실행계획
-                # -----------------------------------------
                 st.divider()
                 st.header("3주 단계적 실행계획")
-
-                three_week_plan = (
-                    generate_three_week_plan(
-                        current,
-                        selected_plan
-                    )
-                )
-
+                three_week_plan = generate_three_week_plan(current, selected_plan)
                 week_columns = st.columns(3)
 
-                for week_column, (_, week) in zip(
-                    week_columns,
-                    three_week_plan.iterrows()
-                ):
-                    with week_column:
-                        week_html = (
-                            '<div class="step-card">'
-                            f'<h3>'
-                            f'{escape(str(week["주차"]))}'
-                            f'</h3>'
-                            f'<p><b>공부:</b> '
-                            f'{week["공부 시간"]:.1f}시간'
-                            f'</p>'
-                            f'<p><b>출석률:</b> '
-                            f'{week["출석률"]:.1f}%'
-                            f'</p>'
-                            f'<p><b>수면:</b> '
-                            f'{week["수면 시간"]:.1f}시간'
-                            f'</p>'
-                            f'<p><b>스크린타임:</b> '
-                            f'{week["스크린타임"]:.1f}시간'
-                            f'</p>'
-                            f'<p><b>핵심:</b> '
-                            f'{escape(str(week["핵심 목표"]))}'
-                            f'</p>'
-                            '</div>'
-                        )
-
+                for column, (_, week) in zip(week_columns, three_week_plan.iterrows()):
+                    with column:
                         st.markdown(
-                            week_html,
-                            unsafe_allow_html=True
+                            (
+                                '<div class="step-card">'
+                                f'<h3>{escape(str(week["주차"]))}</h3>'
+                                f'<p><b>공부:</b> {week["공부 시간"]:.1f}시간</p>'
+                                f'<p><b>출석률:</b> {week["출석률"]:.1f}%</p>'
+                                f'<p><b>수면:</b> {week["수면 시간"]:.1f}시간</p>'
+                                f'<p><b>스크린타임:</b> {week["스크린타임"]:.1f}시간</p>'
+                                f'<p><b>핵심:</b> {escape(str(week["핵심 목표"]))}</p>'
+                                "</div>"
+                            ),
+                            unsafe_allow_html=True,
                         )
 
-                # -----------------------------------------
-                # 일주일 실천계획
-                # -----------------------------------------
-                weekly_plan = (
-                    generate_simple_action_plan(
-                        current,
-                        selected_plan
-                    )
-                )
-
+                weekly_plan = generate_simple_action_plan(current, selected_plan)
                 st.divider()
                 st.header("일주일 실천계획")
 
-                weekday_col, weekend_col = (
-                    st.columns(2)
-                )
-
+                weekday_col, weekend_col = st.columns(2)
                 with weekday_col:
                     st.subheader("평일 핵심 행동")
-
-                    for action in weekly_plan[
-                        "weekday_actions"
-                    ]:
-                        st.write(
-                            f"- {action}"
-                        )
-
+                    for action in weekly_plan["weekday_actions"]:
+                        st.write(f"- {action}")
                 with weekend_col:
                     st.subheader("주말 핵심 행동")
-
-                    for action in weekly_plan[
-                        "weekend_actions"
-                    ]:
-                        st.write(
-                            f"- {action}"
-                        )
+                    for action in weekly_plan["weekend_actions"]:
+                        st.write(f"- {action}")
 
                 goal_col, check_col = st.columns(2)
-
                 with goal_col:
                     st.subheader("이번 주 목표")
-
-                    for goal in weekly_plan[
-                        "core_goals"
-                    ]:
-                        st.write(
-                            f"✅ {goal}"
-                        )
-
+                    for goal in weekly_plan["core_goals"]:
+                        st.write(f"✅ {goal}")
                 with check_col:
                     st.subheader("매일 확인")
-
-                    for item in weekly_plan[
-                        "check_items"
-                    ]:
-                        st.write(
-                            f"□ {item}"
-                        )
+                    for item in weekly_plan["check_items"]:
+                        st.write(f"□ {item}")
 
                 st.subheader("요일별 실천표")
-
                 st.dataframe(
                     weekly_plan["weekly_df"],
                     use_container_width=True,
-                    hide_index=True
+                    hide_index=True,
                 )
 
-                # -----------------------------------------
-                # 실천 체크 및 진행률
-                # -----------------------------------------
                 st.divider()
                 st.header("이번 주 실천 현황")
-
-                st.write(
-                    "실천을 완료한 요일을 체크하세요."
-                )
+                st.write("실천을 완료한 요일을 체크하세요.")
 
                 day_columns = st.columns(7)
-
                 completed_days = []
-
-                for day_column, day in zip(
-                    day_columns,
-                    DAYS
-                ):
-                    checkbox_key = (
-                        f"daily_check_"
-                        f"{selected_type}_"
-                        f"{day}"
-                    )
-
-                    with day_column:
+                for column, day in zip(day_columns, DAYS):
+                    with column:
                         checked = st.checkbox(
-                            day.replace(
-                                "요일",
-                                ""
-                            ),
-                            key=checkbox_key
+                            day.replace("요일", ""),
+                            key=f"daily_check_{selected_type}_{day}",
                         )
-
                     if checked:
-                        completed_days.append(
-                            day
-                        )
+                        completed_days.append(day)
 
-                progress_ratio = (
-                    len(completed_days)
-                    / len(DAYS)
-                )
-
-                progress_percent = int(
-                    round(
-                        progress_ratio * 100
-                    )
-                )
-
-                st.progress(
-                    progress_ratio
-                )
-
+                ratio = len(completed_days) / len(DAYS)
+                percent = int(round(ratio * 100))
+                st.progress(ratio)
                 st.markdown(
-                    (
-                        '<div class="progress-summary">'
-                        f'{len(completed_days)}일 '
-                        f'/ 7일 완료 '
-                        f'· 진행률 '
-                        f'{progress_percent}%'
-                        '</div>'
-                    ),
-                    unsafe_allow_html=True
+                    f'<div class="progress-summary">{len(completed_days)}일 / 7일 완료 · 진행률 {percent}%</div>',
+                    unsafe_allow_html=True,
                 )
 
                 if len(completed_days) == 0:
-                    st.info(
-                        "첫 실천일을 완료하면 체크해 보세요."
-                    )
-
+                    st.info("첫 실천일을 완료하면 체크해 보세요.")
                 elif len(completed_days) < 4:
-                    st.info(
-                        "좋은 시작입니다. "
-                        "작은 실천을 계속 이어가세요."
-                    )
-
+                    st.info("좋은 시작입니다. 작은 실천을 계속 이어가세요.")
                 elif len(completed_days) < 7:
-                    st.success(
-                        "절반 이상 완료했습니다. "
-                        "목표까지 조금 남았습니다."
-                    )
-
+                    st.success("절반 이상 완료했습니다. 목표까지 조금 남았습니다.")
                 else:
-                    st.success(
-                        "이번 주 계획을 모두 완료했습니다! 🎉"
-                    )
+                    st.success("이번 주 계획을 모두 완료했습니다! 🎉")
 
-                if st.button(
-                    "이번 주 체크 초기화"
-                ):
+                if st.button("이번 주 체크 초기화"):
                     clear_daily_checkboxes()
                     st.rerun()
 
-                # -----------------------------------------
-                # 전체 추천 결과
-                # -----------------------------------------
                 st.divider()
+                comparison = make_recommendation_comparison(current, recommendations)
 
-                with st.expander(
-                    "전체 추천 계획 비교 보기"
-                ):
-                    display_recommendations = (
+                with st.expander("전체 추천 계획 비교 보기"):
+                    st.dataframe(
                         recommendations[
                             [
                                 "추천 유형",
@@ -3771,192 +1570,97 @@ with tab4:
                                 "현재 대비 점수 변화",
                                 "변화 부담",
                                 "실행 난이도",
-                                "추천 이유"
+                                "추천 이유",
                             ]
-                        ].copy()
-                    )
-
-                    st.dataframe(
-                        display_recommendations,
+                        ],
                         use_container_width=True,
-                        hide_index=True
+                        hide_index=True,
                     )
+                    st.dataframe(comparison, use_container_width=True, hide_index=True)
 
-                    comparison = (
-                        make_recommendation_comparison(
-                            current,
-                            recommendations
-                        )
-                    )
-
-                    st.dataframe(
-                        comparison,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-                # -----------------------------------------
-                # 엑셀 다운로드
-                # -----------------------------------------
-                comparison = (
-                    make_recommendation_comparison(
-                        current,
-                        recommendations
-                    )
+                all_xlsx = recommendations_to_xlsx(
+                    recommendations,
+                    comparison,
+                    current,
+                    conditions["target_score"],
+                )
+                selected_xlsx = selected_plan_to_xlsx(
+                    selected_plan,
+                    weekly_plan,
+                    three_week_plan,
+                    current,
+                    completed_days,
                 )
 
-                all_xlsx_data = recommendations_to_xlsx(
-                    recommendations=recommendations,
-                    comparison_df=comparison,
-                    current_values=current,
-                    target_score=conditions[
-                        "target_score"
-                    ]
-                )
-
-                selected_xlsx_data = (
-                    selected_plan_to_xlsx(
-                        selected_plan=selected_plan,
-                        weekly_plan=weekly_plan,
-                        three_week_plan=three_week_plan,
-                        current_values=current,
-                        completed_days=completed_days
-                    )
-                )
-
-                download_col1, download_col2 = (
-                    st.columns(2)
-                )
-
-                with download_col1:
+                col1, col2 = st.columns(2)
+                with col1:
                     st.download_button(
                         "전체 추천안 엑셀 다운로드",
-                        data=all_xlsx_data,
-                        file_name=(
-                            "campus_twin_"
-                            "all_recommendations.xlsx"
-                        ),
-                        mime=(
-                            "application/vnd.openxmlformats-"
-                            "officedocument.spreadsheetml.sheet"
-                        )
+                        all_xlsx,
+                        "campus_twin_all_recommendations.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
-
-                with download_col2:
+                with col2:
                     st.download_button(
                         "선택한 계획 엑셀 다운로드",
-                        data=selected_xlsx_data,
-                        file_name=(
-                            "campus_twin_"
-                            "selected_plan.xlsx"
-                        ),
-                        mime=(
-                            "application/vnd.openxmlformats-"
-                            "officedocument.spreadsheetml.sheet"
-                        )
+                        selected_xlsx,
+                        "campus_twin_selected_plan.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
 
                 st.caption(
-                    "선택한 계획 엑셀에는 현재 체크한 "
-                    "요일과 진행률이 함께 저장됩니다."
+                    "선택한 계획 엑셀에는 현재 체크한 요일과 진행률이 함께 저장됩니다."
                 )
 
 
 # =========================================================
-# 탭 5: 프로젝트 설명
+# 프로젝트 설명
 # =========================================================
 with tab5:
     st.header("프로젝트 설명")
-
     st.subheader("프로젝트 목표")
-
-    st.write("""
-    Campus Twin은 대학생의 생활습관을 입력받아
-    학업성과를 예측하고,
-    미래 생활계획과 목표 기반 추천안을 제공하는 웹서비스입니다.
-
-    사용자는 추천안을 선택하고
-    3주 단계계획과 일주일 실천표를 확인할 수 있습니다.
-    """)
+    st.write(
+        """
+        Campus Twin은 대학생의 생활습관을 입력받아 학업성과를 예측하고,
+        미래 생활계획과 목표 기반 추천안을 제공하는 웹서비스입니다.
+        사용자는 추천안을 선택하고 3주 단계계획과 일주일 실천표를 확인할 수 있습니다.
+        """
+    )
 
     st.subheader("사용 변수")
-
-    feature_info = pd.DataFrame({
-        "변수명": FEATURE_COLS,
-        "설명": [
-            "하루 공부 시간",
-            "출석률",
-            "하루 수면 시간",
-            "하루 스크린타임",
-            "하루 신체활동 시간",
-            "스트레스 수준"
-        ]
-    })
-
     st.dataframe(
-        feature_info,
+        pd.DataFrame(
+            {
+                "변수명": FEATURE_COLS,
+                "설명": [FEATURE_LABELS[column] for column in FEATURE_COLS],
+            }
+        ),
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
     )
 
     st.subheader("사용 모델")
-
-    st.write("""
-    - Linear Regression
-    - StandardScaler 기반 입력 표준화
-    """)
+    st.write("- Linear Regression\n- StandardScaler 기반 입력 표준화")
 
     st.subheader("현재 기능")
-
-    st.write("""
-    - 생활습관 기반 학업성과 예측
-    - 개인별 민감도 분석
-    - 미래 계획 시뮬레이션
-    - 목표 기반 추천안 자동 탐색
-    - 최소 변화형·균형형·성과 우선형 추천
-    - 추천안 선택 및 카드 강조
-    - 실행 난이도 안내
-    - 3주 단계적 실행계획
-    - 일주일 핵심 실천계획
-    - 요일별 체크박스
-    - 7일 기준 진행률 표시
-    - 사용자용·분석용 시트를 구분한 엑셀 다운로드
-    """)
-
-    st.subheader("엑셀 출력 구성")
-
-    excel_info = pd.DataFrame({
-        "파일": [
-            "전체 추천안 엑셀",
-            "선택한 계획 엑셀"
-        ],
-        "포함 시트": [
-            (
-                "추천안 비교, 변화 비교, "
-                "입력 조건, 세부 데이터"
-            ),
-            (
-                "계획 요약, 3주 실행계획, "
-                "주간 실천표, 실천 체크리스트, 세부 분석"
-            )
-        ]
-    })
-
-    st.dataframe(
-        excel_info,
-        use_container_width=True,
-        hide_index=True
+    st.write(
+        """
+        - 생활습관 기반 학업성과 예측
+        - 개인별 민감도 분석
+        - 미래 계획 시뮬레이션
+        - 목표 기반 추천안 자동 탐색
+        - 추천안 선택 및 카드 강조
+        - 실행 난이도와 3주 단계계획
+        - 일주일 실천계획과 진행률
+        - 사용자용·분석용 시트를 구분한 엑셀 다운로드
+        """
     )
 
     st.subheader("한계 및 주의사항")
-
-    st.warning("""
-    학업성과 환산 점수는 실제 대학의 GPA가 아닙니다.
-
-    본 서비스는 학습 데이터의 통계적 패턴을 이용한
-    모의 분석 및 계획 지원 시스템이며,
-    실제 성적이나 학업 결과를 보장하지 않습니다.
-
-    체크박스 진행률은 현재 접속 세션에서만 유지되며,
-    엑셀 파일을 다운로드하면 현재 체크 상태가 저장됩니다.
-    """)
+    st.warning(
+        """
+        학업성과 환산 점수는 실제 대학의 GPA가 아닙니다.
+        본 서비스는 학습 데이터의 통계적 패턴을 이용한 모의 분석 및 계획 지원 시스템이며,
+        실제 성적이나 학업 결과를 보장하지 않습니다.
+        """
+    )
