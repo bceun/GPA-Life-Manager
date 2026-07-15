@@ -1,3 +1,4 @@
+from html import escape
 from io import BytesIO
 from itertools import product
 
@@ -29,25 +30,32 @@ st.markdown(
         border: 1px solid #d9dee8;
         border-radius: 14px;
         padding: 20px;
-        min-height: 390px;
+        min-height: 420px;
         background-color: #ffffff;
         margin-bottom: 10px;
+        overflow-wrap: break-word;
     }
 
     .recommendation-card-selected {
         border: 3px solid #ff4b4b;
         border-radius: 14px;
         padding: 18px;
-        min-height: 390px;
+        min-height: 420px;
         background-color: #fff5f5;
         box-shadow: 0 4px 14px rgba(255, 75, 75, 0.16);
         margin-bottom: 10px;
+        overflow-wrap: break-word;
     }
 
     .card-title {
         font-size: 1.45rem;
         font-weight: 700;
         margin-bottom: 14px;
+    }
+
+    .card-score-label {
+        font-size: 0.95rem;
+        margin-bottom: 4px;
     }
 
     .card-score {
@@ -110,7 +118,7 @@ st.markdown(
         border-radius: 12px;
         padding: 16px;
         background-color: #fafbfc;
-        min-height: 220px;
+        min-height: 230px;
     }
 
     .progress-summary {
@@ -151,6 +159,7 @@ DAYS = [
 def load_models():
     model = joblib.load("lr_model.pkl")
     scaler = joblib.load("scaler.pkl")
+
     return model, scaler
 
 
@@ -337,7 +346,7 @@ def create_range(start, stop, step):
 
 
 # =========================================================
-# 민감도 분석 및 비교 함수
+# 민감도 분석 및 비교
 # =========================================================
 def analyze_sensitivity(user_values):
     base_prediction = predict_from_values(
@@ -432,7 +441,7 @@ def compare_plans(current_values, future_values):
 
 
 # =========================================================
-# 추천 알고리즘 함수
+# 추천 알고리즘
 # =========================================================
 def calculate_change_cost(
     current_values,
@@ -941,23 +950,17 @@ def select_recommendations(
         (
             minimum_label,
             minimum_row,
-            (
-                "현재 생활과의 차이가 가장 작은 계획입니다."
-            )
+            "현재 생활과의 차이가 가장 작은 계획입니다."
         ),
         (
             balanced_label,
             balanced_row,
-            (
-                "예상 성과와 생활 변화 부담을 함께 고려한 계획입니다."
-            )
+            "예상 성과와 생활 변화 부담을 함께 고려한 계획입니다."
         ),
         (
             performance_label,
             performance_row,
-            (
-                "설정한 조건에서 가장 높은 점수를 예측한 계획입니다."
-            )
+            "설정한 조건에서 가장 높은 점수를 예측한 계획입니다."
         )
     ]
 
@@ -1008,7 +1011,7 @@ def select_recommendations(
 
 
 # =========================================================
-# 추천 결과 설명 함수
+# 추천 설명 및 계획 함수
 # =========================================================
 def build_change_summary(
     current_values,
@@ -1099,12 +1102,15 @@ def generate_simple_action_plan(
     study_target = float(
         recommendation["공부 시간"]
     )
+
     attendance_target = float(
         recommendation["출석률"]
     )
+
     sleep_target = float(
         recommendation["수면 시간"]
     )
+
     screen_target = float(
         recommendation["스크린타임"]
     )
@@ -1191,17 +1197,11 @@ def generate_simple_action_plan(
             f"스크린타임 {screen_target:.1f}시간 이내"
         )
 
-    weekend_actions.append(
-        "한 주 학습 내용 복습"
-    )
-
-    weekend_actions.append(
-        f"수면 {sleep_target:.1f}시간 유지"
-    )
-
-    weekend_actions.append(
+    weekend_actions = [
+        "한 주 학습 내용 복습",
+        f"수면 {sleep_target:.1f}시간 유지",
         f"스크린타임 {screen_target:.1f}시간 이하"
-    )
+    ]
 
     if not checks:
         checks.append(
@@ -1248,7 +1248,7 @@ def generate_simple_action_plan(
 
 
 # =========================================================
-# 단계적 실행계획 함수
+# 3주 단계적 실행계획
 # =========================================================
 def interpolate_value(
     current_value,
@@ -1282,14 +1282,14 @@ def generate_three_week_plan(
     }
 
     ratios = [
-        ("1주차", 1 / 3),
-        ("2주차", 2 / 3),
-        ("3주차", 1.0)
+        ("1주차", 1 / 3, "생활 변화에 적응"),
+        ("2주차", 2 / 3, "목표 수준에 근접"),
+        ("3주차", 1.0, "최종 추천 목표 실천")
     ]
 
     rows = []
 
-    for week_name, ratio in ratios:
+    for week_name, ratio, key_goal in ratios:
         study_value = interpolate_value(
             current_values["study_hours"],
             target_values["study_hours"],
@@ -1317,25 +1317,17 @@ def generate_three_week_plan(
         rows.append({
             "주차": week_name,
             "공부 시간": round(study_value, 1),
-            "출석률": round(attendance_value),
+            "출석률": round(attendance_value, 1),
             "수면 시간": round(sleep_value, 1),
             "스크린타임": round(screen_value, 1),
-            "핵심 목표": (
-                "생활 변화에 적응"
-                if week_name == "1주차"
-                else (
-                    "목표 수준에 근접"
-                    if week_name == "2주차"
-                    else "최종 추천 목표 실천"
-                )
-            )
+            "핵심 목표": key_goal
         })
 
     return pd.DataFrame(rows)
 
 
 # =========================================================
-# 추천 비교 함수
+# 추천 비교
 # =========================================================
 def make_recommendation_comparison(
     current_values,
@@ -1376,7 +1368,7 @@ def make_recommendation_comparison(
 
 
 # =========================================================
-# 카드 HTML 생성 함수
+# 카드 HTML
 # =========================================================
 def build_recommendation_card_html(
     row,
@@ -1400,43 +1392,43 @@ def build_recommendation_card_html(
         else ""
     )
 
-    change_summary = build_change_summary(
-        current_values,
-        row
+    recommendation_type = escape(
+        str(row["추천 유형"])
     )
 
-    return f"""
-    <div class="{card_class}">
-        {selected_badge}
-        <div class="card-title">
-            {row["추천 유형"]}
-        </div>
+    recommendation_reason = escape(
+        str(row["추천 이유"])
+    )
 
-        <div>예상 학업성과 점수</div>
+    change_summary = escape(
+        build_change_summary(
+            current_values,
+            row
+        )
+    )
 
-        <div class="card-score">
-            {row["예상 환산 점수"]:.2f} / {DISPLAY_SCORE_MAX:.2f}
-        </div>
-
-        <div class="card-delta-positive">
-            ↑ {row["현재 대비 점수 변화"]:+.2f}
-        </div>
-
-        <p><b>공부 시간:</b> {row["공부 시간"]:.1f}시간</p>
-        <p><b>출석률:</b> {row["출석률"]:.0f}%</p>
-        <p><b>수면 시간:</b> {row["수면 시간"]:.1f}시간</p>
-        <p><b>스크린타임:</b> {row["스크린타임"]:.1f}시간</p>
-        <p><b>실행 난이도:</b>
-            {row["실행 난이도"]} ({row["실행 난이도 점수"]}/5)
-        </p>
-
-        <div class="card-reason">
-            {row["추천 이유"]}
-        </div>
-
-        <small>{change_summary}</small>
-    </div>
-    """
+    return (
+        f'<div class="{card_class}">'
+        f'{selected_badge}'
+        f'<div class="card-title">{recommendation_type}</div>'
+        f'<div class="card-score-label">예상 학업성과 점수</div>'
+        f'<div class="card-score">'
+        f'{row["예상 환산 점수"]:.2f} / {DISPLAY_SCORE_MAX:.2f}'
+        f'</div>'
+        f'<div class="card-delta-positive">'
+        f'↑ {row["현재 대비 점수 변화"]:+.2f}'
+        f'</div>'
+        f'<p><b>공부 시간:</b> {row["공부 시간"]:.1f}시간</p>'
+        f'<p><b>출석률:</b> {row["출석률"]:.0f}%</p>'
+        f'<p><b>수면 시간:</b> {row["수면 시간"]:.1f}시간</p>'
+        f'<p><b>스크린타임:</b> {row["스크린타임"]:.1f}시간</p>'
+        f'<p><b>실행 난이도:</b> '
+        f'{escape(str(row["실행 난이도"]))} '
+        f'({int(row["실행 난이도 점수"])}/5)</p>'
+        f'<div class="card-reason">{recommendation_reason}</div>'
+        f'<small>{change_summary}</small>'
+        f'</div>'
+    )
 
 
 # =========================================================
@@ -1652,7 +1644,7 @@ def selected_plan_to_xlsx(
 
 
 # =========================================================
-# 체크 상태 관리 함수
+# 체크박스 상태 관리
 # =========================================================
 def clear_daily_checkboxes():
     keys_to_delete = [
@@ -1842,7 +1834,9 @@ with tab1:
             clear_daily_checkboxes()
 
             if "recommendation_selector" in st.session_state:
-                del st.session_state["recommendation_selector"]
+                del st.session_state[
+                    "recommendation_selector"
+                ]
 
         except Exception as error:
             st.error(
@@ -2373,12 +2367,16 @@ with tab4:
                     recommendations.iterrows()
                 ):
                     with column:
-                        st.markdown(
+                        card_html = (
                             build_recommendation_card_html(
                                 row=row,
                                 current_values=current,
                                 selected_type=selected_type
-                            ),
+                            )
+                        )
+
+                        st.markdown(
+                            card_html,
                             unsafe_allow_html=True
                         )
 
@@ -2442,12 +2440,12 @@ with tab4:
                 )
 
                 st.markdown(
-                    f"""
-                    <div class="{difficulty_info['class_name']}">
-                        <b>{difficulty_info['title']}</b><br>
-                        {difficulty_info['message']}
-                    </div>
-                    """,
+                    (
+                        f'<div class="{difficulty_info["class_name"]}">'
+                        f'<b>{escape(difficulty_info["title"])}</b><br>'
+                        f'{escape(difficulty_info["message"])}'
+                        f'</div>'
+                    ),
                     unsafe_allow_html=True
                 )
 
@@ -2469,17 +2467,24 @@ with tab4:
                     three_week_plan.iterrows()
                 ):
                     with week_column:
+                        week_html = (
+                            '<div class="step-card">'
+                            f'<h3>{escape(str(week["주차"]))}</h3>'
+                            f'<p><b>공부:</b> '
+                            f'{week["공부 시간"]:.1f}시간</p>'
+                            f'<p><b>출석률:</b> '
+                            f'{week["출석률"]:.1f}%</p>'
+                            f'<p><b>수면:</b> '
+                            f'{week["수면 시간"]:.1f}시간</p>'
+                            f'<p><b>스크린타임:</b> '
+                            f'{week["스크린타임"]:.1f}시간</p>'
+                            f'<p><b>핵심:</b> '
+                            f'{escape(str(week["핵심 목표"]))}</p>'
+                            '</div>'
+                        )
+
                         st.markdown(
-                            f"""
-                            <div class="step-card">
-                                <h3>{week['주차']}</h3>
-                                <p><b>공부:</b> {week['공부 시간']:.1f}시간</p>
-                                <p><b>출석률:</b> {week['출석률']:.0f}%</p>
-                                <p><b>수면:</b> {week['수면 시간']:.1f}시간</p>
-                                <p><b>스크린타임:</b> {week['스크린타임']:.1f}시간</p>
-                                <p><b>핵심:</b> {week['핵심 목표']}</p>
-                            </div>
-                            """,
+                            week_html,
                             unsafe_allow_html=True
                         )
 
@@ -2590,12 +2595,12 @@ with tab4:
                 )
 
                 st.markdown(
-                    f"""
-                    <div class="progress-summary">
-                        {completed_days}일 / 7일 완료
-                        · 진행률 {progress_percent}%
-                    </div>
-                    """,
+                    (
+                        '<div class="progress-summary">'
+                        f'{completed_days}일 / 7일 완료 '
+                        f'· 진행률 {progress_percent}%'
+                        '</div>'
+                    ),
                     unsafe_allow_html=True
                 )
 
