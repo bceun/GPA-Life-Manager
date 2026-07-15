@@ -1,3 +1,4 @@
+from datetime import datetime
 from html import escape
 from io import BytesIO
 from itertools import product
@@ -6,7 +7,14 @@ import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl import Workbook
+from openpyxl.styles import (
+    Alignment,
+    Border,
+    Font,
+    PatternFill,
+    Side
+)
 from openpyxl.utils import get_column_letter
 
 
@@ -150,6 +158,94 @@ DAYS = [
     "토요일",
     "일요일"
 ]
+
+
+# =========================================================
+# 엑셀 스타일 설정
+# =========================================================
+EXCEL_TITLE_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="1F4E78"
+)
+
+EXCEL_SUBTITLE_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="D9EAF7"
+)
+
+EXCEL_HEADER_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="5B9BD5"
+)
+
+EXCEL_LIGHT_BLUE_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="EAF3F8"
+)
+
+EXCEL_GREEN_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="E2F0D9"
+)
+
+EXCEL_YELLOW_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="FFF2CC"
+)
+
+EXCEL_RED_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="FCE4D6"
+)
+
+EXCEL_GRAY_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="F2F2F2"
+)
+
+EXCEL_WHITE_FONT = Font(
+    color="FFFFFF",
+    bold=True
+)
+
+EXCEL_TITLE_FONT = Font(
+    color="FFFFFF",
+    bold=True,
+    size=18
+)
+
+EXCEL_SUBTITLE_FONT = Font(
+    color="1F1F1F",
+    bold=True,
+    size=11
+)
+
+EXCEL_HEADER_FONT = Font(
+    color="FFFFFF",
+    bold=True
+)
+
+EXCEL_SECTION_FONT = Font(
+    bold=True,
+    size=13,
+    color="1F4E78"
+)
+
+EXCEL_NORMAL_FONT = Font(
+    size=10
+)
+
+EXCEL_THIN_SIDE = Side(
+    style="thin",
+    color="D9E1F2"
+)
+
+EXCEL_BORDER = Border(
+    left=EXCEL_THIN_SIDE,
+    right=EXCEL_THIN_SIDE,
+    top=EXCEL_THIN_SIDE,
+    bottom=EXCEL_THIN_SIDE
+)
 
 
 # =========================================================
@@ -1432,212 +1528,1157 @@ def build_recommendation_card_html(
 
 
 # =========================================================
-# 엑셀 함수
+# 엑셀 공통 함수
 # =========================================================
-def apply_excel_style(workbook):
-    header_fill = PatternFill(
-        fill_type="solid",
-        fgColor="D9EAF7"
+def set_excel_title(
+    worksheet,
+    title,
+    subtitle,
+    last_column
+):
+    last_column_letter = get_column_letter(
+        last_column
     )
 
-    header_font = Font(
-        bold=True
+    worksheet.merge_cells(
+        f"A1:{last_column_letter}1"
     )
 
-    for worksheet in workbook.worksheets:
-        worksheet.freeze_panes = "A2"
-        worksheet.auto_filter.ref = (
-            worksheet.dimensions
+    worksheet["A1"] = title
+    worksheet["A1"].fill = EXCEL_TITLE_FILL
+    worksheet["A1"].font = EXCEL_TITLE_FONT
+    worksheet["A1"].alignment = Alignment(
+        horizontal="left",
+        vertical="center"
+    )
+
+    worksheet.row_dimensions[1].height = 32
+
+    worksheet.merge_cells(
+        f"A2:{last_column_letter}2"
+    )
+
+    worksheet["A2"] = subtitle
+    worksheet["A2"].fill = EXCEL_SUBTITLE_FILL
+    worksheet["A2"].font = EXCEL_SUBTITLE_FONT
+    worksheet["A2"].alignment = Alignment(
+        horizontal="left",
+        vertical="center",
+        wrap_text=True
+    )
+
+    worksheet.row_dimensions[2].height = 35
+
+    worksheet.merge_cells(
+        f"A3:{last_column_letter}3"
+    )
+
+    worksheet["A3"] = (
+        "생성일: "
+        + datetime.now().strftime(
+            "%Y-%m-%d %H:%M"
+        )
+    )
+
+    worksheet["A3"].font = Font(
+        italic=True,
+        color="666666",
+        size=9
+    )
+
+    worksheet["A3"].alignment = Alignment(
+        horizontal="right"
+    )
+
+
+def set_excel_sheet_options(
+    worksheet,
+    landscape=True,
+    freeze_panes="A5"
+):
+    worksheet.freeze_panes = freeze_panes
+    worksheet.sheet_view.showGridLines = False
+
+    worksheet.page_setup.orientation = (
+        "landscape"
+        if landscape
+        else "portrait"
+    )
+
+    worksheet.page_setup.fitToWidth = 1
+    worksheet.page_setup.fitToHeight = 0
+
+    worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+
+    worksheet.page_margins.left = 0.3
+    worksheet.page_margins.right = 0.3
+    worksheet.page_margins.top = 0.5
+    worksheet.page_margins.bottom = 0.5
+
+
+def write_excel_table(
+    worksheet,
+    start_row,
+    headers,
+    rows,
+    widths=None,
+    number_formats=None
+):
+    for column_index, header in enumerate(
+        headers,
+        start=1
+    ):
+        cell = worksheet.cell(
+            row=start_row,
+            column=column_index,
+            value=header
         )
 
-        for cell in worksheet[1]:
-            cell.fill = header_fill
-            cell.font = header_font
+        cell.fill = EXCEL_HEADER_FILL
+        cell.font = EXCEL_HEADER_FONT
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True
+        )
+        cell.border = EXCEL_BORDER
+
+    worksheet.row_dimensions[
+        start_row
+    ].height = 28
+
+    for row_index, row_values in enumerate(
+        rows,
+        start=start_row + 1
+    ):
+        for column_index, value in enumerate(
+            row_values,
+            start=1
+        ):
+            cell = worksheet.cell(
+                row=row_index,
+                column=column_index,
+                value=value
+            )
+
+            cell.font = EXCEL_NORMAL_FONT
             cell.alignment = Alignment(
                 horizontal="center",
                 vertical="center",
                 wrap_text=True
             )
+            cell.border = EXCEL_BORDER
 
-        for column_cells in worksheet.columns:
-            max_length = 0
+            if row_index % 2 == 0:
+                cell.fill = EXCEL_LIGHT_BLUE_FILL
 
-            column_letter = get_column_letter(
-                column_cells[0].column
-            )
-
-            for cell in column_cells:
-                cell.alignment = Alignment(
-                    vertical="center",
-                    wrap_text=True
+            if (
+                number_formats
+                and column_index in number_formats
+            ):
+                cell.number_format = (
+                    number_formats[column_index]
                 )
 
-                if cell.value is not None:
-                    max_length = max(
-                        max_length,
-                        len(str(cell.value))
-                    )
+        worksheet.row_dimensions[
+            row_index
+        ].height = 25
 
+    if widths:
+        for column_index, width in widths.items():
             worksheet.column_dimensions[
-                column_letter
-            ].width = min(
-                max(max_length + 3, 12),
-                40
+                get_column_letter(column_index)
+            ].width = width
+
+    end_row = (
+        start_row + len(rows)
+    )
+
+    end_column_letter = get_column_letter(
+        len(headers)
+    )
+
+    worksheet.auto_filter.ref = (
+        f"A{start_row}:"
+        f"{end_column_letter}{end_row}"
+    )
+
+
+def write_excel_key_value_section(
+    worksheet,
+    start_row,
+    title,
+    values,
+    value_column_width=32
+):
+    worksheet.merge_cells(
+        start_row=start_row,
+        start_column=1,
+        end_row=start_row,
+        end_column=2
+    )
+
+    title_cell = worksheet.cell(
+        row=start_row,
+        column=1,
+        value=title
+    )
+
+    title_cell.font = EXCEL_SECTION_FONT
+    title_cell.fill = EXCEL_SUBTITLE_FILL
+    title_cell.alignment = Alignment(
+        vertical="center"
+    )
+
+    worksheet.row_dimensions[
+        start_row
+    ].height = 25
+
+    current_row = start_row + 1
+
+    for label, value in values:
+        label_cell = worksheet.cell(
+            row=current_row,
+            column=1,
+            value=label
+        )
+
+        value_cell = worksheet.cell(
+            row=current_row,
+            column=2,
+            value=value
+        )
+
+        label_cell.fill = EXCEL_GRAY_FILL
+        label_cell.font = Font(
+            bold=True
+        )
+
+        for cell in [
+            label_cell,
+            value_cell
+        ]:
+            cell.border = EXCEL_BORDER
+            cell.alignment = Alignment(
+                vertical="center",
+                wrap_text=True
             )
 
-        for row in worksheet.iter_rows(
-            min_row=2
-        ):
-            for cell in row:
-                if isinstance(cell.value, float):
-                    cell.number_format = "0.00"
+        worksheet.row_dimensions[
+            current_row
+        ].height = 24
 
-        worksheet.sheet_view.showGridLines = False
+        current_row += 1
+
+    worksheet.column_dimensions[
+        "A"
+    ].width = 24
+
+    worksheet.column_dimensions[
+        "B"
+    ].width = value_column_width
+
+    return current_row
 
 
+def get_excel_difficulty_fill(
+    difficulty_score
+):
+    if difficulty_score <= 2:
+        return EXCEL_GREEN_FILL
+
+    if difficulty_score == 3:
+        return EXCEL_YELLOW_FILL
+
+    return EXCEL_RED_FILL
+
+
+# =========================================================
+# 전체 추천안 엑셀
+# =========================================================
 def recommendations_to_xlsx(
     recommendations,
     comparison_df,
     current_values,
     target_score
 ):
-    output = BytesIO()
+    workbook = Workbook()
 
-    current_df = pd.DataFrame({
-        "항목": [
+    summary_sheet = workbook.active
+    summary_sheet.title = "추천안 비교"
+
+    set_excel_title(
+        worksheet=summary_sheet,
+        title="Campus Twin 전체 추천안 비교",
+        subtitle=(
+            "목표 점수와 생활 제약조건 안에서 생성된 "
+            "추천안을 핵심 항목 중심으로 비교합니다."
+        ),
+        last_column=10
+    )
+
+    summary_headers = [
+        "추천 유형",
+        "공부 시간",
+        "출석률",
+        "수면 시간",
+        "스크린타임",
+        "예상 점수",
+        "점수 변화",
+        "변화 부담",
+        "실행 난이도",
+        "추천 이유"
+    ]
+
+    summary_rows = []
+
+    for _, row in recommendations.iterrows():
+        summary_rows.append([
+            row["추천 유형"],
+            float(row["공부 시간"]),
+            float(row["출석률"]),
+            float(row["수면 시간"]),
+            float(row["스크린타임"]),
+            float(row["예상 환산 점수"]),
+            float(row["현재 대비 점수 변화"]),
+            row["변화 부담"],
+            (
+                f"{row['실행 난이도']} "
+                f"({int(row['실행 난이도 점수'])}/5)"
+            ),
+            row["추천 이유"]
+        ])
+
+    write_excel_table(
+        worksheet=summary_sheet,
+        start_row=5,
+        headers=summary_headers,
+        rows=summary_rows,
+        widths={
+            1: 20,
+            2: 12,
+            3: 12,
+            4: 12,
+            5: 14,
+            6: 13,
+            7: 13,
+            8: 12,
+            9: 18,
+            10: 42
+        },
+        number_formats={
+            2: "0.0",
+            3: "0.0",
+            4: "0.0",
+            5: "0.0",
+            6: "0.00",
+            7: "+0.00;-0.00;0.00"
+        }
+    )
+
+    for row_index, row in enumerate(
+        recommendations.itertuples(
+            index=False
+        ),
+        start=6
+    ):
+        difficulty_score = int(
+            getattr(
+                row,
+                "실행_난이도_점수"
+            )
+        )
+
+        summary_sheet.cell(
+            row=row_index,
+            column=9
+        ).fill = get_excel_difficulty_fill(
+            difficulty_score
+        )
+
+    set_excel_sheet_options(
+        worksheet=summary_sheet,
+        landscape=True,
+        freeze_panes="A6"
+    )
+
+    # -----------------------------------------------------
+    # 변화 비교 시트
+    # -----------------------------------------------------
+    change_sheet = workbook.create_sheet(
+        "변화 비교"
+    )
+
+    set_excel_title(
+        worksheet=change_sheet,
+        title="현재 생활 대비 변화 비교",
+        subtitle=(
+            "각 추천안이 현재 생활습관에서 "
+            "얼마나 달라지는지 보여줍니다."
+        ),
+        last_column=9
+    )
+
+    change_headers = list(
+        comparison_df.columns
+    )
+
+    change_rows = (
+        comparison_df
+        .astype(object)
+        .values
+        .tolist()
+    )
+
+    write_excel_table(
+        worksheet=change_sheet,
+        start_row=5,
+        headers=change_headers,
+        rows=change_rows,
+        widths={
+            1: 21,
+            2: 17,
+            3: 17,
+            4: 17,
+            5: 19,
+            6: 15,
+            7: 18,
+            8: 13,
+            9: 15
+        },
+        number_formats={
+            2: "+0.00;-0.00;0.00",
+            3: "+0.00;-0.00;0.00",
+            4: "+0.00;-0.00;0.00",
+            5: "+0.00;-0.00;0.00",
+            6: "0.00",
+            7: "+0.00;-0.00;0.00"
+        }
+    )
+
+    set_excel_sheet_options(
+        worksheet=change_sheet,
+        landscape=True,
+        freeze_panes="A6"
+    )
+
+    # -----------------------------------------------------
+    # 입력 조건 시트
+    # -----------------------------------------------------
+    condition_sheet = workbook.create_sheet(
+        "입력 조건"
+    )
+
+    set_excel_title(
+        worksheet=condition_sheet,
+        title="Campus Twin 입력 조건",
+        subtitle=(
+            "추천 계획을 생성할 때 사용한 "
+            "현재 생활습관과 목표 점수입니다."
+        ),
+        last_column=2
+    )
+
+    current_prediction = predict_from_values(
+        current_values
+    )
+
+    condition_values = [
+        (
             "현재 공부 시간",
+            f"{current_values['study_hours']:.1f}시간"
+        ),
+        (
             "현재 출석률",
+            f"{current_values['attendance']:.1f}%"
+        ),
+        (
             "현재 수면 시간",
+            f"{current_values['sleep_hours']:.1f}시간"
+        ),
+        (
             "현재 스크린타임",
+            f"{current_values['screen_time']:.1f}시간"
+        ),
+        (
             "현재 신체활동",
+            f"{current_values['physical_activity']:.1f}시간"
+        ),
+        (
             "현재 스트레스",
-            "목표 학업성과 점수"
-        ],
-        "값": [
-            current_values["study_hours"],
-            current_values["attendance"],
-            current_values["sleep_hours"],
-            current_values["screen_time"],
-            current_values["physical_activity"],
-            current_values["stress"],
-            target_score
-        ]
-    })
-
-    with pd.ExcelWriter(
-        output,
-        engine="openpyxl"
-    ) as writer:
-
-        recommendations.to_excel(
-            writer,
-            sheet_name="추천 계획",
-            index=False
+            f"{current_values['stress']:.1f}단계"
+        ),
+        (
+            "현재 학업성과 점수",
+            f"{current_prediction['display_score']:.2f} / 4.50"
+        ),
+        (
+            "목표 학업성과 점수",
+            f"{target_score:.2f} / 4.50"
         )
+    ]
 
-        comparison_df.to_excel(
-            writer,
-            sheet_name="현재 대비 변화",
-            index=False
+    write_excel_key_value_section(
+        worksheet=condition_sheet,
+        start_row=5,
+        title="현재 상태 및 목표",
+        values=condition_values,
+        value_column_width=30
+    )
+
+    set_excel_sheet_options(
+        worksheet=condition_sheet,
+        landscape=False,
+        freeze_panes="A6"
+    )
+
+    # -----------------------------------------------------
+    # 세부 데이터 시트
+    # -----------------------------------------------------
+    detail_sheet = workbook.create_sheet(
+        "세부 데이터"
+    )
+
+    set_excel_title(
+        worksheet=detail_sheet,
+        title="추천안 세부 계산 데이터",
+        subtitle=(
+            "모델 원본 예측값과 변화 부담 수치 등 "
+            "분석용 데이터를 포함합니다."
+        ),
+        last_column=len(
+            recommendations.columns
         )
+    )
 
-        current_df.to_excel(
-            writer,
-            sheet_name="입력 조건",
-            index=False
+    detail_headers = list(
+        recommendations.columns
+    )
+
+    detail_rows = (
+        recommendations
+        .astype(object)
+        .values
+        .tolist()
+    )
+
+    detail_widths = {
+        index: 16
+        for index in range(
+            1,
+            len(detail_headers) + 1
         )
+    }
 
-        apply_excel_style(writer.book)
+    if "추천 이유" in detail_headers:
+        detail_widths[
+            detail_headers.index(
+                "추천 이유"
+            ) + 1
+        ] = 45
 
+    write_excel_table(
+        worksheet=detail_sheet,
+        start_row=5,
+        headers=detail_headers,
+        rows=detail_rows,
+        widths=detail_widths
+    )
+
+    set_excel_sheet_options(
+        worksheet=detail_sheet,
+        landscape=True,
+        freeze_panes="A6"
+    )
+
+    output = BytesIO()
+    workbook.save(output)
     output.seek(0)
 
     return output.getvalue()
 
 
+# =========================================================
+# 선택한 계획 엑셀
+# =========================================================
 def selected_plan_to_xlsx(
     selected_plan,
     weekly_plan,
     three_week_plan,
-    current_values
+    current_values,
+    completed_days
 ):
-    output = BytesIO()
+    workbook = Workbook()
 
-    selected_df = pd.DataFrame([
-        selected_plan.to_dict()
-    ])
+    # -----------------------------------------------------
+    # 계획 요약
+    # -----------------------------------------------------
+    summary_sheet = workbook.active
+    summary_sheet.title = "계획 요약"
 
-    summary_df = pd.DataFrame({
-        "구분": [
+    set_excel_title(
+        worksheet=summary_sheet,
+        title="Campus Twin 선택 계획 요약",
+        subtitle=(
+            "선택한 추천안의 핵심 정보와 "
+            "현재 생활 대비 변화를 정리한 문서입니다."
+        ),
+        last_column=4
+    )
+
+    difficulty_score = int(
+        selected_plan[
+            "실행 난이도 점수"
+        ]
+    )
+
+    progress_percent = int(
+        round(
+            len(completed_days)
+            / len(DAYS)
+            * 100
+        )
+    )
+
+    summary_values = [
+        (
             "추천 유형",
-            "생활 변화",
-            "추천 이유",
-            "실행 난이도"
-        ],
-        "내용": [
-            selected_plan["추천 유형"],
+            selected_plan["추천 유형"]
+        ),
+        (
+            "예상 학업성과 점수",
+            (
+                f"{selected_plan['예상 환산 점수']:.2f}"
+                " / 4.50"
+            )
+        ),
+        (
+            "현재 대비 점수 변화",
+            (
+                f"{selected_plan['현재 대비 점수 변화']:+.2f}"
+            )
+        ),
+        (
+            "실행 난이도",
+            (
+                f"{selected_plan['실행 난이도']} "
+                f"({difficulty_score}/5)"
+            )
+        ),
+        (
+            "핵심 생활 변화",
             build_change_summary(
                 current_values,
                 selected_plan
-            ),
-            selected_plan["추천 이유"],
+            )
+        ),
+        (
+            "추천 이유",
+            selected_plan["추천 이유"]
+        ),
+        (
+            "이번 주 진행률",
             (
-                f"{selected_plan['실행 난이도']} "
-                f"({selected_plan['실행 난이도 점수']}/5)"
+                f"{len(completed_days)}일 / 7일 "
+                f"({progress_percent}%)"
+            )
+        )
+    ]
+
+    next_row = write_excel_key_value_section(
+        worksheet=summary_sheet,
+        start_row=5,
+        title="선택한 추천안",
+        values=summary_values,
+        value_column_width=52
+    )
+
+    summary_sheet[
+        f"B{next_row - 4}"
+    ].fill = get_excel_difficulty_fill(
+        difficulty_score
+    )
+
+    current_target_headers = [
+        "생활요인",
+        "현재",
+        "추천 목표",
+        "변화"
+    ]
+
+    current_target_rows = [
+        [
+            "공부 시간",
+            current_values["study_hours"],
+            float(
+                selected_plan["공부 시간"]
+            ),
+            (
+                float(
+                    selected_plan["공부 시간"]
+                )
+                - current_values["study_hours"]
+            )
+        ],
+        [
+            "출석률",
+            current_values["attendance"],
+            float(
+                selected_plan["출석률"]
+            ),
+            (
+                float(
+                    selected_plan["출석률"]
+                )
+                - current_values["attendance"]
+            )
+        ],
+        [
+            "수면 시간",
+            current_values["sleep_hours"],
+            float(
+                selected_plan["수면 시간"]
+            ),
+            (
+                float(
+                    selected_plan["수면 시간"]
+                )
+                - current_values["sleep_hours"]
+            )
+        ],
+        [
+            "스크린타임",
+            current_values["screen_time"],
+            float(
+                selected_plan["스크린타임"]
+            ),
+            (
+                float(
+                    selected_plan["스크린타임"]
+                )
+                - current_values["screen_time"]
             )
         ]
-    })
+    ]
 
-    with pd.ExcelWriter(
-        output,
-        engine="openpyxl"
-    ) as writer:
+    write_excel_table(
+        worksheet=summary_sheet,
+        start_row=next_row + 2,
+        headers=current_target_headers,
+        rows=current_target_rows,
+        widths={
+            1: 18,
+            2: 14,
+            3: 14,
+            4: 14
+        },
+        number_formats={
+            2: "0.0",
+            3: "0.0",
+            4: "+0.0;-0.0;0.0"
+        }
+    )
 
-        selected_df.to_excel(
-            writer,
-            sheet_name="선택한 추천안",
-            index=False
-        )
+    set_excel_sheet_options(
+        worksheet=summary_sheet,
+        landscape=False,
+        freeze_panes="A5"
+    )
 
-        summary_df.to_excel(
-            writer,
-            sheet_name="계획 요약",
-            index=False
-        )
+    # -----------------------------------------------------
+    # 3주 실행계획
+    # -----------------------------------------------------
+    three_week_sheet = workbook.create_sheet(
+        "3주 실행계획"
+    )
 
-        three_week_plan.to_excel(
-            writer,
-            sheet_name="3주 단계계획",
-            index=False
-        )
+    set_excel_title(
+        worksheet=three_week_sheet,
+        title="3주 단계적 실행계획",
+        subtitle=(
+            "생활 변화 부담을 줄이기 위해 "
+            "목표 수준에 단계적으로 접근합니다."
+        ),
+        last_column=6
+    )
 
-        weekly_plan["weekly_df"].to_excel(
-            writer,
-            sheet_name="주간 실천표",
-            index=False
-        )
+    three_week_headers = [
+        "주차",
+        "공부 시간",
+        "출석률",
+        "수면 시간",
+        "스크린타임",
+        "핵심 목표"
+    ]
 
-        pd.DataFrame({
-            "평일 실천사항": (
-                weekly_plan["weekday_actions"]
+    three_week_rows = (
+        three_week_plan[
+            [
+                "주차",
+                "공부 시간",
+                "출석률",
+                "수면 시간",
+                "스크린타임",
+                "핵심 목표"
+            ]
+        ]
+        .astype(object)
+        .values
+        .tolist()
+    )
+
+    write_excel_table(
+        worksheet=three_week_sheet,
+        start_row=5,
+        headers=three_week_headers,
+        rows=three_week_rows,
+        widths={
+            1: 13,
+            2: 14,
+            3: 14,
+            4: 14,
+            5: 16,
+            6: 30
+        },
+        number_formats={
+            2: "0.0",
+            3: "0.0",
+            4: "0.0",
+            5: "0.0"
+        }
+    )
+
+    for row_index in range(
+        6,
+        6 + len(three_week_rows)
+    ):
+        if row_index == 6:
+            fill = EXCEL_GREEN_FILL
+        elif row_index == 7:
+            fill = EXCEL_YELLOW_FILL
+        else:
+            fill = EXCEL_RED_FILL
+
+        for column_index in range(
+            1,
+            7
+        ):
+            three_week_sheet.cell(
+                row=row_index,
+                column=column_index
+            ).fill = fill
+
+    set_excel_sheet_options(
+        worksheet=three_week_sheet,
+        landscape=True,
+        freeze_panes="A6"
+    )
+
+    # -----------------------------------------------------
+    # 주간 실천표
+    # -----------------------------------------------------
+    weekly_sheet = workbook.create_sheet(
+        "주간 실천표"
+    )
+
+    set_excel_title(
+        worksheet=weekly_sheet,
+        title="요일별 주간 실천표",
+        subtitle=(
+            "요일별 목표를 확인하고 실천 후 "
+            "완료 여부를 직접 표시할 수 있습니다."
+        ),
+        last_column=6
+    )
+
+    weekly_headers = [
+        "요일",
+        "공부 목표",
+        "출석 목표",
+        "수면 목표",
+        "스크린타임 목표",
+        "완료 여부"
+    ]
+
+    weekly_rows = []
+
+    for _, row in weekly_plan[
+        "weekly_df"
+    ].iterrows():
+        day = row["요일"]
+
+        weekly_rows.append([
+            day,
+            row["공부 목표"],
+            row["출석 목표"],
+            row["수면 목표"],
+            row["스크린타임 목표"],
+            (
+                "완료"
+                if day in completed_days
+                else "미완료"
             )
-        }).to_excel(
-            writer,
-            sheet_name="평일 계획",
-            index=False
+        ])
+
+    write_excel_table(
+        worksheet=weekly_sheet,
+        start_row=5,
+        headers=weekly_headers,
+        rows=weekly_rows,
+        widths={
+            1: 12,
+            2: 24,
+            3: 20,
+            4: 16,
+            5: 22,
+            6: 14
+        }
+    )
+
+    for row_index, row_values in enumerate(
+        weekly_rows,
+        start=6
+    ):
+        status_cell = weekly_sheet.cell(
+            row=row_index,
+            column=6
         )
 
-        pd.DataFrame({
-            "주말 실천사항": (
-                weekly_plan["weekend_actions"]
+        if row_values[5] == "완료":
+            status_cell.fill = EXCEL_GREEN_FILL
+            status_cell.font = Font(
+                bold=True,
+                color="008000"
             )
-        }).to_excel(
-            writer,
-            sheet_name="주말 계획",
-            index=False
+
+        else:
+            status_cell.fill = EXCEL_GRAY_FILL
+            status_cell.font = Font(
+                color="666666"
+            )
+
+    set_excel_sheet_options(
+        worksheet=weekly_sheet,
+        landscape=True,
+        freeze_panes="A6"
+    )
+
+    # -----------------------------------------------------
+    # 실천 체크리스트
+    # -----------------------------------------------------
+    checklist_sheet = workbook.create_sheet(
+        "실천 체크리스트"
+    )
+
+    set_excel_title(
+        worksheet=checklist_sheet,
+        title="일주일 실천 체크리스트",
+        subtitle=(
+            "평일·주말 핵심 행동과 "
+            "매일 확인할 항목을 정리했습니다."
+        ),
+        last_column=3
+    )
+
+    checklist_rows = []
+
+    for action in weekly_plan[
+        "weekday_actions"
+    ]:
+        checklist_rows.append([
+            "평일 핵심 행동",
+            action,
+            "□"
+        ])
+
+    for action in weekly_plan[
+        "weekend_actions"
+    ]:
+        checklist_rows.append([
+            "주말 핵심 행동",
+            action,
+            "□"
+        ])
+
+    for goal in weekly_plan[
+        "core_goals"
+    ]:
+        checklist_rows.append([
+            "이번 주 목표",
+            goal,
+            "□"
+        ])
+
+    for item in weekly_plan[
+        "check_items"
+    ]:
+        checklist_rows.append([
+            "매일 확인",
+            item,
+            "□"
+        ])
+
+    write_excel_table(
+        worksheet=checklist_sheet,
+        start_row=5,
+        headers=[
+            "구분",
+            "실천 내용",
+            "확인"
+        ],
+        rows=checklist_rows,
+        widths={
+            1: 20,
+            2: 52,
+            3: 12
+        }
+    )
+
+    set_excel_sheet_options(
+        worksheet=checklist_sheet,
+        landscape=False,
+        freeze_panes="A6"
+    )
+
+    # -----------------------------------------------------
+    # 세부 분석
+    # -----------------------------------------------------
+    detail_sheet = workbook.create_sheet(
+        "세부 분석"
+    )
+
+    set_excel_title(
+        worksheet=detail_sheet,
+        title="선택 계획 세부 분석",
+        subtitle=(
+            "모델 예측값과 변화 부담 등 "
+            "분석용 세부 정보를 포함합니다."
+        ),
+        last_column=2
+    )
+
+    detail_values = [
+        (
+            "추천 유형",
+            selected_plan["추천 유형"]
+        ),
+        (
+            "공부 시간",
+            float(
+                selected_plan["공부 시간"]
+            )
+        ),
+        (
+            "출석률",
+            float(
+                selected_plan["출석률"]
+            )
+        ),
+        (
+            "수면 시간",
+            float(
+                selected_plan["수면 시간"]
+            )
+        ),
+        (
+            "스크린타임",
+            float(
+                selected_plan["스크린타임"]
+            )
+        ),
+        (
+            "신체활동",
+            float(
+                selected_plan["신체활동"]
+            )
+        ),
+        (
+            "스트레스",
+            float(
+                selected_plan["스트레스"]
+            )
+        ),
+        (
+            "예상 환산 점수",
+            float(
+                selected_plan["예상 환산 점수"]
+            )
+        ),
+        (
+            "원본 예측 점수",
+            float(
+                selected_plan["원본 예측 점수"]
+            )
+        ),
+        (
+            "현재 대비 점수 변화",
+            float(
+                selected_plan["현재 대비 점수 변화"]
+            )
+        ),
+        (
+            "변화 부담",
+            selected_plan["변화 부담"]
+        ),
+        (
+            "변화 부담 수치",
+            float(
+                selected_plan["변화 부담 수치"]
+            )
+        ),
+        (
+            "실행 난이도",
+            selected_plan["실행 난이도"]
+        ),
+        (
+            "실행 난이도 점수",
+            int(
+                selected_plan["실행 난이도 점수"]
+            )
+        ),
+        (
+            "주요 생활시간 합계",
+            float(
+                selected_plan["주요 생활시간 합계"]
+            )
+        ),
+        (
+            "추천 이유",
+            selected_plan["추천 이유"]
+        )
+    ]
+
+    write_excel_key_value_section(
+        worksheet=detail_sheet,
+        start_row=5,
+        title="모델 및 추천 세부 정보",
+        values=detail_values,
+        value_column_width=46
+    )
+
+    for row_index in range(
+        7,
+        7 + len(detail_values)
+    ):
+        value_cell = detail_sheet.cell(
+            row=row_index,
+            column=2
         )
 
-        apply_excel_style(writer.book)
+        if isinstance(
+            value_cell.value,
+            float
+        ):
+            value_cell.number_format = "0.0000"
 
+    set_excel_sheet_options(
+        worksheet=detail_sheet,
+        landscape=False,
+        freeze_panes="A6"
+    )
+
+    output = BytesIO()
+    workbook.save(output)
     output.seek(0)
 
     return output.getvalue()
@@ -1650,7 +2691,9 @@ def clear_daily_checkboxes():
     keys_to_delete = [
         key
         for key in st.session_state.keys()
-        if str(key).startswith("daily_check_")
+        if str(key).startswith(
+            "daily_check_"
+        )
     ]
 
     for key in keys_to_delete:
@@ -1833,7 +2876,10 @@ with tab1:
 
             clear_daily_checkboxes()
 
-            if "recommendation_selector" in st.session_state:
+            if (
+                "recommendation_selector"
+                in st.session_state
+            ):
                 del st.session_state[
                     "recommendation_selector"
                 ]
@@ -1974,7 +3020,9 @@ with tab3:
                 "계획 공부 시간",
                 0.0,
                 12.0,
-                float(current["study_hours"]),
+                float(
+                    current["study_hours"]
+                ),
                 0.5,
                 key="future_study"
             )
@@ -1983,7 +3031,9 @@ with tab3:
                 "계획 출석률",
                 0.0,
                 100.0,
-                float(current["attendance"]),
+                float(
+                    current["attendance"]
+                ),
                 1.0,
                 key="future_attendance"
             )
@@ -1992,7 +3042,9 @@ with tab3:
                 "계획 수면 시간",
                 0.0,
                 12.0,
-                float(current["sleep_hours"]),
+                float(
+                    current["sleep_hours"]
+                ),
                 0.5,
                 key="future_sleep"
             )
@@ -2002,7 +3054,9 @@ with tab3:
                 "계획 스크린타임",
                 0.0,
                 16.0,
-                float(current["screen_time"]),
+                float(
+                    current["screen_time"]
+                ),
                 0.5,
                 key="future_screen"
             )
@@ -2011,7 +3065,9 @@ with tab3:
                 "계획 신체활동 시간",
                 0.0,
                 8.0,
-                float(current["physical_activity"]),
+                float(
+                    current["physical_activity"]
+                ),
                 0.5,
                 key="future_activity"
             )
@@ -2020,7 +3076,9 @@ with tab3:
                 "계획 스트레스 수준",
                 1.0,
                 10.0,
-                float(current["stress"]),
+                float(
+                    current["stress"]
+                ),
                 0.5,
                 key="future_stress"
             )
@@ -2065,21 +3123,29 @@ with tab3:
 
             metric_col1.metric(
                 "현재 점수",
-                f"{comparison_result['current_display_score']:.2f}"
+                (
+                    f"{comparison_result['current_display_score']:.2f}"
+                )
             )
 
             metric_col2.metric(
                 "미래 점수",
-                f"{comparison_result['future_display_score']:.2f}"
+                (
+                    f"{comparison_result['future_display_score']:.2f}"
+                )
             )
 
             metric_col3.metric(
                 "예상 변화",
-                f"{comparison_result['display_score_change']:+.2f}"
+                (
+                    f"{comparison_result['display_score_change']:+.2f}"
+                )
             )
 
             st.dataframe(
-                comparison_result["comparison_df"],
+                comparison_result[
+                    "comparison_df"
+                ],
                 use_container_width=True,
                 hide_index=True
             )
@@ -2113,14 +3179,17 @@ with tab4:
 
         st.subheader("목표 및 현실성 조건")
 
-        condition_col1, condition_col2 = st.columns(2)
+        condition_col1, condition_col2 = (
+            st.columns(2)
+        )
 
         with condition_col1:
             default_target = min(
                 DISPLAY_SCORE_MAX,
                 round(
-                    current_prediction["display_score"]
-                    + 0.3,
+                    current_prediction[
+                        "display_score"
+                    ] + 0.3,
                     1
                 )
             )
@@ -2129,7 +3198,9 @@ with tab4:
                 "목표 학업성과 환산 점수",
                 min_value=0.0,
                 max_value=DISPLAY_SCORE_MAX,
-                value=float(default_target),
+                value=float(
+                    default_target
+                ),
                 step=0.1
             )
 
@@ -2142,7 +3213,9 @@ with tab4:
                 value=float(
                     min(
                         12.0,
-                        current["study_hours"] + 2.0
+                        current[
+                            "study_hours"
+                        ] + 2.0
                     )
                 ),
                 step=0.5
@@ -2168,7 +3241,9 @@ with tab4:
                 value=float(
                     min(
                         2.0,
-                        current["screen_time"]
+                        current[
+                            "screen_time"
+                        ]
                     )
                 ),
                 step=0.5
@@ -2178,12 +3253,14 @@ with tab4:
                 "가능한 출석률 최대 증가폭",
                 min_value=0.0,
                 max_value=float(
-                    100.0 - current["attendance"]
+                    100.0
+                    - current["attendance"]
                 ),
                 value=float(
                     min(
                         10.0,
-                        100.0 - current["attendance"]
+                        100.0
+                        - current["attendance"]
                     )
                 ),
                 step=1.0
@@ -2216,14 +3293,16 @@ with tab4:
         ):
             if not changeable_features:
                 st.warning(
-                    "변경 가능한 생활요인을 한 개 이상 선택해 주세요."
+                    "변경 가능한 생활요인을 "
+                    "한 개 이상 선택해 주세요."
                 )
 
             elif min_sleep > (
                 current["sleep_hours"] + 1.5
             ):
                 st.warning(
-                    "최소 수면시간을 현재보다 1.5시간 이내로 설정해 주세요."
+                    "최소 수면시간을 현재보다 "
+                    "1.5시간 이내로 설정해 주세요."
                 )
 
             else:
@@ -2254,7 +3333,9 @@ with tab4:
                             target_score
                         )
 
-                        st.session_state.recommendation_result = result
+                        st.session_state.recommendation_result = (
+                            result
+                        )
 
                         st.session_state.recommendation_conditions = {
                             "target_score": target_score,
@@ -2268,7 +3349,10 @@ with tab4:
 
                         clear_daily_checkboxes()
 
-                        if "recommendation_selector" in st.session_state:
+                        if (
+                            "recommendation_selector"
+                            in st.session_state
+                        ):
                             del st.session_state[
                                 "recommendation_selector"
                             ]
@@ -2279,7 +3363,10 @@ with tab4:
                     )
                     st.exception(error)
 
-        if st.session_state.recommendation_result is not None:
+        if (
+            st.session_state.recommendation_result
+            is not None
+        ):
             result = (
                 st.session_state.recommendation_result
             )
@@ -2296,7 +3383,8 @@ with tab4:
             st.header("추천 결과")
 
             st.caption(
-                f"총 {conditions['candidate_count']:,}개 "
+                f"총 "
+                f"{conditions['candidate_count']:,}개 "
                 "후보 계획을 평가했습니다."
             )
 
@@ -2330,8 +3418,10 @@ with tab4:
                     st.session_state.selected_recommendation_type
                     in recommendation_types
                 ):
-                    default_index = recommendation_types.index(
-                        st.session_state.selected_recommendation_type
+                    default_index = (
+                        recommendation_types.index(
+                            st.session_state.selected_recommendation_type
+                        )
                     )
 
                 selected_type = st.radio(
@@ -2371,7 +3461,9 @@ with tab4:
                             build_recommendation_card_html(
                                 row=row,
                                 current_values=current,
-                                selected_type=selected_type
+                                selected_type=(
+                                    selected_type
+                                )
                             )
                         )
 
@@ -2386,7 +3478,8 @@ with tab4:
                 ].iloc[0]
 
                 st.success(
-                    f"선택한 추천안: **{selected_type}**"
+                    f"선택한 추천안: "
+                    f"**{selected_type}**"
                 )
 
                 st.header("선택한 계획 요약")
@@ -2431,18 +3524,24 @@ with tab4:
                     + selected_plan["추천 이유"]
                 )
 
-                difficulty_info = get_difficulty_message(
-                    int(
-                        selected_plan[
-                            "실행 난이도 점수"
-                        ]
+                difficulty_info = (
+                    get_difficulty_message(
+                        int(
+                            selected_plan[
+                                "실행 난이도 점수"
+                            ]
+                        )
                     )
                 )
 
                 st.markdown(
                     (
-                        f'<div class="{difficulty_info["class_name"]}">'
-                        f'<b>{escape(difficulty_info["title"])}</b><br>'
+                        f'<div class="'
+                        f'{difficulty_info["class_name"]}'
+                        f'">'
+                        f'<b>'
+                        f'{escape(difficulty_info["title"])}'
+                        f'</b><br>'
                         f'{escape(difficulty_info["message"])}'
                         f'</div>'
                     ),
@@ -2455,9 +3554,11 @@ with tab4:
                 st.divider()
                 st.header("3주 단계적 실행계획")
 
-                three_week_plan = generate_three_week_plan(
-                    current,
-                    selected_plan
+                three_week_plan = (
+                    generate_three_week_plan(
+                        current,
+                        selected_plan
+                    )
                 )
 
                 week_columns = st.columns(3)
@@ -2469,17 +3570,24 @@ with tab4:
                     with week_column:
                         week_html = (
                             '<div class="step-card">'
-                            f'<h3>{escape(str(week["주차"]))}</h3>'
+                            f'<h3>'
+                            f'{escape(str(week["주차"]))}'
+                            f'</h3>'
                             f'<p><b>공부:</b> '
-                            f'{week["공부 시간"]:.1f}시간</p>'
+                            f'{week["공부 시간"]:.1f}시간'
+                            f'</p>'
                             f'<p><b>출석률:</b> '
-                            f'{week["출석률"]:.1f}%</p>'
+                            f'{week["출석률"]:.1f}%'
+                            f'</p>'
                             f'<p><b>수면:</b> '
-                            f'{week["수면 시간"]:.1f}시간</p>'
+                            f'{week["수면 시간"]:.1f}시간'
+                            f'</p>'
                             f'<p><b>스크린타임:</b> '
-                            f'{week["스크린타임"]:.1f}시간</p>'
+                            f'{week["스크린타임"]:.1f}시간'
+                            f'</p>'
                             f'<p><b>핵심:</b> '
-                            f'{escape(str(week["핵심 목표"]))}</p>'
+                            f'{escape(str(week["핵심 목표"]))}'
+                            f'</p>'
                             '</div>'
                         )
 
@@ -2491,15 +3599,19 @@ with tab4:
                 # -----------------------------------------
                 # 일주일 실천계획
                 # -----------------------------------------
-                weekly_plan = generate_simple_action_plan(
-                    current,
-                    selected_plan
+                weekly_plan = (
+                    generate_simple_action_plan(
+                        current,
+                        selected_plan
+                    )
                 )
 
                 st.divider()
                 st.header("일주일 실천계획")
 
-                weekday_col, weekend_col = st.columns(2)
+                weekday_col, weekend_col = (
+                    st.columns(2)
+                )
 
                 with weekday_col:
                     st.subheader("평일 핵심 행동")
@@ -2507,7 +3619,9 @@ with tab4:
                     for action in weekly_plan[
                         "weekday_actions"
                     ]:
-                        st.write(f"- {action}")
+                        st.write(
+                            f"- {action}"
+                        )
 
                 with weekend_col:
                     st.subheader("주말 핵심 행동")
@@ -2515,7 +3629,9 @@ with tab4:
                     for action in weekly_plan[
                         "weekend_actions"
                     ]:
-                        st.write(f"- {action}")
+                        st.write(
+                            f"- {action}"
+                        )
 
                 goal_col, check_col = st.columns(2)
 
@@ -2525,7 +3641,9 @@ with tab4:
                     for goal in weekly_plan[
                         "core_goals"
                     ]:
-                        st.write(f"✅ {goal}")
+                        st.write(
+                            f"✅ {goal}"
+                        )
 
                 with check_col:
                     st.subheader("매일 확인")
@@ -2533,7 +3651,9 @@ with tab4:
                     for item in weekly_plan[
                         "check_items"
                     ]:
-                        st.write(f"□ {item}")
+                        st.write(
+                            f"□ {item}"
+                        )
 
                 st.subheader("요일별 실천표")
 
@@ -2555,7 +3675,7 @@ with tab4:
 
                 day_columns = st.columns(7)
 
-                completed_days = 0
+                completed_days = []
 
                 for day_column, day in zip(
                     day_columns,
@@ -2577,10 +3697,12 @@ with tab4:
                         )
 
                     if checked:
-                        completed_days += 1
+                        completed_days.append(
+                            day
+                        )
 
                 progress_ratio = (
-                    completed_days
+                    len(completed_days)
                     / len(DAYS)
                 )
 
@@ -2597,26 +3719,30 @@ with tab4:
                 st.markdown(
                     (
                         '<div class="progress-summary">'
-                        f'{completed_days}일 / 7일 완료 '
-                        f'· 진행률 {progress_percent}%'
+                        f'{len(completed_days)}일 '
+                        f'/ 7일 완료 '
+                        f'· 진행률 '
+                        f'{progress_percent}%'
                         '</div>'
                     ),
                     unsafe_allow_html=True
                 )
 
-                if completed_days == 0:
+                if len(completed_days) == 0:
                     st.info(
                         "첫 실천일을 완료하면 체크해 보세요."
                     )
 
-                elif completed_days < 4:
+                elif len(completed_days) < 4:
                     st.info(
-                        "좋은 시작입니다. 작은 실천을 계속 이어가세요."
+                        "좋은 시작입니다. "
+                        "작은 실천을 계속 이어가세요."
                     )
 
-                elif completed_days < 7:
+                elif len(completed_days) < 7:
                     st.success(
-                        "절반 이상 완료했습니다. 목표까지 조금 남았습니다."
+                        "절반 이상 완료했습니다. "
+                        "목표까지 조금 남았습니다."
                     )
 
                 else:
@@ -2698,7 +3824,8 @@ with tab4:
                         selected_plan=selected_plan,
                         weekly_plan=weekly_plan,
                         three_week_plan=three_week_plan,
-                        current_values=current
+                        current_values=current,
+                        completed_days=completed_days
                     )
                 )
 
@@ -2711,7 +3838,8 @@ with tab4:
                         "전체 추천안 엑셀 다운로드",
                         data=all_xlsx_data,
                         file_name=(
-                            "campus_twin_all_recommendations.xlsx"
+                            "campus_twin_"
+                            "all_recommendations.xlsx"
                         ),
                         mime=(
                             "application/vnd.openxmlformats-"
@@ -2724,7 +3852,8 @@ with tab4:
                         "선택한 계획 엑셀 다운로드",
                         data=selected_xlsx_data,
                         file_name=(
-                            "campus_twin_selected_plan.xlsx"
+                            "campus_twin_"
+                            "selected_plan.xlsx"
                         ),
                         mime=(
                             "application/vnd.openxmlformats-"
@@ -2733,7 +3862,8 @@ with tab4:
                     )
 
                 st.caption(
-                    "체크 진행률은 현재 브라우저 세션에서만 유지됩니다."
+                    "선택한 계획 엑셀에는 현재 체크한 "
+                    "요일과 진행률이 함께 저장됩니다."
                 )
 
 
@@ -2795,8 +3925,33 @@ with tab5:
     - 일주일 핵심 실천계획
     - 요일별 체크박스
     - 7일 기준 진행률 표시
-    - 추천 계획 엑셀 다운로드
+    - 사용자용·분석용 시트를 구분한 엑셀 다운로드
     """)
+
+    st.subheader("엑셀 출력 구성")
+
+    excel_info = pd.DataFrame({
+        "파일": [
+            "전체 추천안 엑셀",
+            "선택한 계획 엑셀"
+        ],
+        "포함 시트": [
+            (
+                "추천안 비교, 변화 비교, "
+                "입력 조건, 세부 데이터"
+            ),
+            (
+                "계획 요약, 3주 실행계획, "
+                "주간 실천표, 실천 체크리스트, 세부 분석"
+            )
+        ]
+    })
+
+    st.dataframe(
+        excel_info,
+        use_container_width=True,
+        hide_index=True
+    )
 
     st.subheader("한계 및 주의사항")
 
@@ -2807,5 +3962,6 @@ with tab5:
     모의 분석 및 계획 지원 시스템이며,
     실제 성적이나 학업 결과를 보장하지 않습니다.
 
-    체크박스 진행률은 현재 접속 세션에서만 유지됩니다.
+    체크박스 진행률은 현재 접속 세션에서만 유지되며,
+    엑셀 파일을 다운로드하면 현재 체크 상태가 저장됩니다.
     """)
