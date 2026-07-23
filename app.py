@@ -1552,6 +1552,7 @@ with tab4:
 
                 if st.button("이번 주 체크 초기화"):
                     clear_daily_checkboxes()
+                    clear_completed_days ()
                     st.rerun()
 
                 st.divider()
